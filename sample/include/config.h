@@ -1,0 +1,73 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ==================== 板型选择 ====================
+// #define BOARD_ESP32_C3_DEVKITM_1
+#define BOARD_AIRM2M_CORE_ESP32C3
+
+// ==================== 引脚配置 ====================
+#ifdef BOARD_ESP32_C3_DEVKITM_1
+    #define PIN_TFT_CS      0
+    #define PIN_TFT_DC      1
+    #define PIN_TFT_RST     2
+    #define PIN_TFT_MOSI    3
+    #define PIN_TFT_SCLK    4
+    #define PIN_TFT_BL      5
+    #define PIN_DS18B20     -1    // 6
+    #define PIN_LED_D4      8
+    #define PIN_DHT11       9
+    #define PIN_LED_D5      -1
+    #define PIN_TOUCH       -1
+
+#elif defined(BOARD_AIRM2M_CORE_ESP32C3)
+    #define PIN_TFT_CS      0
+    #define PIN_TFT_DC      1
+    #define PIN_TFT_RST     2
+    #define PIN_TFT_MOSI    3
+    #define PIN_TFT_SCLK    4
+    #define PIN_TFT_BL      5
+    #define PIN_DS18B20     -1    // 6
+    #define PIN_TOUCH       10
+    #define PIN_DHT11       18
+    #define PIN_LED_D4      12
+    #define PIN_LED_D5      13
+    #define PIN_I2C_SDA     7 // AHT20+BMP230
+    #define PIN_I2C_SCL     6  // AHT20+BMP230
+
+
+#else
+    #error "请在 config.h 中选择板型"
+
+#endif
+
+// ==================== 显示屏配置 ====================
+// TFT_* 引脚宏已在 platformio.ini 中定义，此处不再重复定义
+#define SCREEN_WIDTH  320
+#define SCREEN_HEIGHT 170
+
+// ==================== WiFi配置 ====================
+#define WIFI_SSID      "Froad-Guest"
+#define WIFI_PASS      "Tr#d5@gL"
+
+// ==================== 和风天气配置 ====================
+extern const char* QWEATHER_HOST;
+extern const char* LOCATION;
+extern const char* JWT_KID;
+extern const char* JWT_SUB;
+extern const char* PRIVATE_KEY;
+
+// ==================== 时间配置 ====================
+#define GMT_OFFSET_SEC      28800
+#define DAYLIGHT_OFFSET_SEC 0
+
+// ==================== 更新间隔配置（毫秒）====================
+#define WEATHER_UPDATE_INTERVAL  3600000 // 1 小时
+#define TIME_SYNC_INTERVAL       3600000 // 1 小时
+#define WIFI_CHECK_INTERVAL      10000   // 10 秒
+#define TEMP_READ_INTERVAL       5000    // 5 秒
+
+// ==================== 背光配置 ====================
+// BACKLIGHT_CHANNEL 在 main.cpp 中定义
+#define BACKLIGHT_DEFAULT_LEVEL 2
+
+#endif
