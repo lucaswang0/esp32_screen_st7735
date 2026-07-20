@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <DHT.h>
+#include "DHT11Sensor.h"
 #include <time.h>
 #include <SPIFFS.h>
 #include "Display.h"
@@ -13,10 +13,9 @@
 // ============================================================================
 #define DHTPIN1         6
 #define DHTPIN2         7
-#define DHTTYPE         DHT11
 #define PIN_TFT_BL      5
 #define BACKLIGHT_CHANNEL 0
-
+#define LED_PIN 8
 // ============================================================================
 // 时间配置
 // ============================================================================
@@ -28,16 +27,16 @@
 // 间隔配置
 // ============================================================================
 #define PAGE_SWITCH_INTERVAL    10000   // 10秒切换页面
-#define SAMPLE_INTERVAL         300000  // 5分钟采样
-#define WIFI_CHECK_INTERVAL     5000    // 5秒检查WiFi
+#define SAMPLE_INTERVAL         600000  // 10分钟采样
+#define WIFI_CHECK_INTERVAL     10000    // 10秒检查WiFi
 #define NTP_SYNC_INTERVAL       3600000 // 1小时同步NTP
 #define BACKLIGHT_PERCENT       80
 
 // ============================================================================
 // 全局对象
 // ============================================================================
-DHT dht1(DHTPIN1, DHTTYPE);
-DHT dht2(DHTPIN2, DHTTYPE);
+DHT11Sensor dht1(DHTPIN1);
+DHT11Sensor dht2(DHTPIN2);
 
 WiFiManager wifiManager;
 SensorHistory sensorHistory1("sensor1");
@@ -119,18 +118,24 @@ bool syncNTP() {
 // 读取传感器数据（统一读取，避免重复）
 // ============================================================================
 void readSensors(float& t1, float& h1, float& t2, float& h2) {
-    t1 = dht1.readTemperature();
-    h1 = dht1.readHumidity();
-    t2 = dht2.readTemperature();
-    h2 = dht2.readHumidity();
+    dht1.update();
+    dht2.update();
     
-    // 无效数据回退
+    t1 = dht1.getTemperature();
+    h1 = dht1.getHumidity();
+    t2 = dht2.getTemperature();
+    h2 = dht2.getHumidity();
+    
     static float lastT1 = -999, lastH1 = -999, lastT2 = -999, lastH2 = -999;
     
-    if (isnan(t1)) t1 = lastT1;
-    if (isnan(h1)) h1 = lastH1;
-    if (isnan(t2)) t2 = lastT2;
-    if (isnan(h2)) h2 = lastH2;
+    if (!dht1.isValid() || t1 < -10 || t1 > 60 || h1 < 0 || h1 > 100) {
+        if (lastT1 != -999) t1 = lastT1;
+        if (lastH1 != -999) h1 = lastH1;
+    }
+    if (!dht2.isValid() || t2 < -10 || t2 > 60 || h2 < 0 || h2 > 100) {
+        if (lastT2 != -999) t2 = lastT2;
+        if (lastH2 != -999) h2 = lastH2;
+    }
     
     lastT1 = t1;
     lastH1 = h1;
@@ -226,7 +231,12 @@ void setup() {
     ledcAttachPin(PIN_TFT_BL, BACKLIGHT_CHANNEL);
     setBacklight(BACKLIGHT_PERCENT);
     
+    // ---- LED指示灯 ----
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+    
     // ---- WiFi ----
+    wifiManager.begin();
     if (wifiManager.connect()) {
         timeSynced = syncNTP();
     } else {
@@ -245,6 +255,13 @@ void setup() {
     sensorHistory1.loadFromFile();
     sensorHistory2.loadFromFile();
     
+    // ---- 初始化时钟页面 ----
+    initClockPage();
+    
+    // ---- 初始化图表页面 ----
+    initChartPage();
+    
+    
     // ---- 首次绘制 ----
     Serial.println("[OK] 初始化完成");
     drawBg();
@@ -262,33 +279,77 @@ void loop() {
     static unsigned long lastSample = 0;
     static unsigned long lastNtpSync = 0;
     static unsigned long lastBacklightCheck = 0;
+    static unsigned long lastLedToggle = 0;
+    static bool ledState = false;
     static int currentPage = 0;
     static bool initialDraw = true;
+    static int lastRecordMinute = -1;
     
+
+
     unsigned long now = millis();
     
-    // ---- 1. 页面切换 (每10秒) ----
-    if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
-        lastPageSwitch = now;
-        currentPage = 1 - currentPage;
-        switchPage(currentPage);
-        lastSecond = now;
-    }
-    
-    // ---- 2. 每秒刷新 (实时更新) ----
-    if (now - lastSecond >= 1000) {
-        if (currentPage == 0) {
-            drawClockPage();
-        } else {
-            drawChartPage();
+    // ---- LED指示灯控制 ----
+    if (wifiManager.isConnected()) {
+        digitalWrite(LED_PIN, LOW);
+    } else {
+        if (now - lastLedToggle >= 500) {
+            lastLedToggle = now;
+            ledState = !ledState;
+            digitalWrite(LED_PIN, ledState);
         }
-        lastSecond = now;
     }
     
-    // ---- 3. 采集数据 (每5分钟) ----
-    if (now - lastSample >= SAMPLE_INTERVAL) {
-        lastSample = now;
-        saveSensorData();  // ← 这里会自动检查跨天
+// ---- 1. 页面切换 (每10秒) ----
+if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
+    lastPageSwitch = now;
+    currentPage = 1 - currentPage;
+    forcePageRedraw = true;  // ← 设置为 true
+    drawBg();  // 清屏
+    
+    // 完整绘制页面（强制重绘所有内容）
+    if (currentPage == 0) {
+        drawClockPage();  // 内部会使用 forcePageRedraw = true
+    } else {
+        drawChartPage();
+    }
+    // forcePageRedraw = false; 
+    Serial.printf("[Page] 切换到页面 %d\n", currentPage);
+}
+
+// ---- 2. 每秒刷新 (只更新动态部分) ----
+if (now - lastSecond >= 1000) {
+    if (currentPage == 0) {
+        updateClockPage();  // 只更新动态内容（时间、传感器等）
+    } else {
+        updateChartPage();  // 只更新图表数据
+    }
+    lastSecond = now;
+        // ✅ 在每秒刷新完成后重置 forcePageRedraw
+    forcePageRedraw = false;
+}
+
+// // ---- 3. 定期完整刷新（防止显示异常，可选） ----
+// if (now - lastFullRedraw >= 60000) {  // 每60秒完整重绘一次
+//     lastFullRedraw = now;
+//     drawBg();
+//     if (currentPage == 0) {
+//         drawClockPage();
+//     } else {
+//         drawChartPage();
+//     }
+//     Serial.println("[Page] 定期完整刷新");
+// }
+    
+    // ---- 3. 采集数据 (每10分钟，NTP同步成功后开始，分钟为10的倍数时记录) ----
+    if (timeSynced) {
+        getLocalTime(&timeinfo);
+        int currentMinute = timeinfo.tm_min;
+        if (currentMinute % 10 == 0 && currentMinute != lastRecordMinute) {
+            lastRecordMinute = currentMinute;
+            saveSensorData();
+            Serial.printf("[Sample] 定时记录: %02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min);
+        }
     }
     
     // ---- 4. WiFi 维护 (每5秒) ----
@@ -298,12 +359,17 @@ void loop() {
     }
     
     // ---- 5. NTP 定期同步 (每小时) ----
-    if (timeSynced && (now - lastNtpSync >= NTP_SYNC_INTERVAL)) {
+    // 条件改为：网络已连接 且 (从未同步 或 到达同步间隔)
+    if (WiFi.status() == WL_CONNECTED && 
+        (!timeSynced || (now - lastNtpSync >= NTP_SYNC_INTERVAL))) {
+        
         lastNtpSync = now;
         if (syncNTP()) {
             timeSynced = true;
         } else {
             timeSynced = false;
+            // 失败后缩短重试间隔，比如5分钟后重试
+            lastNtpSync = now - NTP_SYNC_INTERVAL + 300000; // 5分钟后重试
         }
     }
     

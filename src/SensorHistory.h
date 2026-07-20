@@ -38,11 +38,14 @@ private:
     SensorSample _samples[MAX_SAMPLES];
     int _head;
     int _count;
-    int _lastDayOfYear;      // 改为存储一年中的第几天
+    int _lastDayOfYear;
     const char* _filenamePrefix;
+    static const int MAX_HISTORY_DAYS = 7;
     
     void getCurrentFilename(char* buffer, size_t size);
+    void getFilenameForDay(char* buffer, size_t size, int dayOffset);
     int getDayOfYear(uint8_t hour, uint8_t minute);
+    void cleanOldFiles();
 };
 
 #endif

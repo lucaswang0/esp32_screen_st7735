@@ -51,19 +51,55 @@ int SensorHistory::getDayOfYear(uint8_t hour, uint8_t minute) {
     return timeinfo.tm_yday;  // tm_yday: 0-365
 }
 
-// 检查是否跨天（新的一天）
+void SensorHistory::getFilenameForDay(char* buffer, size_t size, int dayOffset) {
+    time_t now = time(NULL);
+    time_t targetTime = now + dayOffset * 24 * 3600;
+    struct tm *tm_info = localtime(&targetTime);
+    snprintf(buffer, size, "/%s_%04d-%02d-%02d.dat", 
+             _filenamePrefix, 
+             tm_info->tm_year + 1900, 
+             tm_info->tm_mon + 1, 
+             tm_info->tm_mday);
+}
+
+void SensorHistory::cleanOldFiles() {
+    for (int i = MAX_HISTORY_DAYS; i <= 365; i++) {
+        char oldFilename[32];
+        getFilenameForDay(oldFilename, sizeof(oldFilename), -i);
+        
+        if (SPIFFS.exists(oldFilename)) {
+            if (SPIFFS.remove(oldFilename)) {
+                Serial.printf("[SensorHistory] 删除 %d 天前的旧文件: %s\n", i, oldFilename);
+            } else {
+                Serial.printf("[SensorHistory] 删除失败: %s\n", oldFilename);
+            }
+        } else {
+            break;
+        }
+    }
+}
+
 void SensorHistory::checkDayChange(uint8_t currentHour, uint8_t currentMinute) {
     int currentDay = getDayOfYear(currentHour, currentMinute);
     
-    // 如果是第一次调用，记录当前日期
     if (_lastDayOfYear == -1) {
         _lastDayOfYear = currentDay;
         return;
     }
     
-    // 如果日期变了，说明是新的一天
     if (currentDay != _lastDayOfYear) {
-        Serial.printf("[SensorHistory] 日期变化: %d -> %d, 重置数据\n", _lastDayOfYear, currentDay);
+        Serial.printf("[SensorHistory] 日期变化: %d -> %d\n", _lastDayOfYear, currentDay);
+        
+        char oldFilename[32];
+        getFilenameForDay(oldFilename, sizeof(oldFilename), -1);
+        Serial.printf("[SensorHistory] 保存前一天数据到 %s\n", oldFilename);
+        
+        if (_count > 0) {
+            saveToFile(oldFilename);
+        }
+        
+        cleanOldFiles();
+        
         reset();
         _lastDayOfYear = currentDay;
     }
@@ -169,8 +205,6 @@ bool SensorHistory::loadFromFile() {
 }
 
 bool SensorHistory::loadFromFile(const char* filename) {
-    reset();
-    
     fs::File file = SPIFFS.open(filename, FILE_READ);
     if (!file) {
         Serial.printf("[SensorHistory] 文件不存在: %s\n", filename);

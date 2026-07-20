@@ -1,14 +1,13 @@
 #include "ClockPage.h"
 #include "Display.h"
-#include <DHT.h>
+#include "DHT11Sensor.h"
 #include <time.h>
 #include "WiFiManager.h"
 
-extern DHT dht1;
-extern DHT dht2;
+extern DHT11Sensor dht1;
+extern DHT11Sensor dht2;
 extern WiFiManager wifiManager;
 extern bool timeSynced;
-extern bool forcePageRedraw;
 
 // ============================================================================
 // 调试开关
@@ -38,7 +37,7 @@ const int STATUS_H      = 12;       // y: 0-11
 const int TIME_Y        = STATUS_Y + STATUS_H + 8;   // y: 18
 const int TIME_H        = 28;       // y: 18-45
 
-const int DATE_Y        = TIME_Y + TIME_H + 7;       // y: 52
+const int DATE_Y        = TIME_Y + TIME_H + 12;       // y: 52
 const int DATE_H        = 18;       // y: 52-69
 
 const int SENSOR1_Y     = DATE_Y + DATE_H + 3;       // y: 73
@@ -47,7 +46,7 @@ const int SENSOR1_H     = 12;       // y: 73-84
 const int SENSOR2_Y     = SENSOR1_Y + SENSOR1_H + 3; // y: 88
 const int SENSOR2_H     = 12;       // y: 88-99
 
-const int BOTTOM_Y      = SENSOR2_Y + SENSOR2_H + 6; // y: 106
+const int BOTTOM_Y      = SENSOR2_Y + SENSOR2_H + 4; // y: 106
 const int BOTTOM_H      = 128 - BOTTOM_Y;            // y: 106-127
 
 const int LABEL_X       = 0;
@@ -55,7 +54,29 @@ const int LABEL_X       = 0;
 const char* WEEK_DAYS[] = {"日", "一", "二", "三", "四", "五", "六"};
 
 // ============================================================================
-// 调试辅助函数（使用外部 clearRect）
+// 静态缓存变量（保存上次的值，用于判断是否需要更新）
+// ============================================================================
+static bool initialized = false;
+
+// 状态栏缓存
+static bool lastWifi = false;
+static int lastRssi = 999;
+static bool lastNtp = false;
+
+// 时间缓存
+static int lastH = -1, lastM = -1, lastS = -1;
+
+// 日期缓存
+static int lastDay = -1, lastWday = -1;
+
+// 传感器缓存
+static float lastValues[4] = {-999, -999, -999, -999};
+
+// 底部状态缓存
+static int lastSeconds = -1;
+
+// ============================================================================
+// 调试辅助函数
 // ============================================================================
 
 // 声明外部 clearRect 函数（在 Display.cpp 中定义）
@@ -103,10 +124,6 @@ void clearRectDebug(int x, int y, int w, int h, const char* region) {
 // 辅助函数：绘制状态栏
 // ============================================================================
 void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
-    static bool lastWifi = false;
-    static int lastRssi = 999;
-    static bool lastNtp = false;
-    
     bool wifiChanged = (wifiConnected != lastWifi || rssi != lastRssi);
     bool ntpChanged = (ntpOk != lastNtp);
     
@@ -151,19 +168,35 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
 // ============================================================================
 // 辅助函数：绘制时间
 // ============================================================================
-void drawTime(int h, int m, bool force) {
-    static int lastH = -1, lastM = -1;
+void drawTime(int h, int m, int s, bool force) {
+    if (!force && h == lastH && m == lastM && s == lastS) return;
     
-    if (!force && h == lastH && m == lastM) return;
+    clearRectDebug(0, TIME_Y, 128, TIME_H + 12, "时间");
     
-    clearRectDebug(0, TIME_Y, 128, TIME_H, "时间");
+    int displayH = h % 12;
+    if (displayH == 0) displayH = 12;
+    const char* period = (h >= 12) ? "PM" : "AM";
+    
+    // ===== 时间（居中偏左） =====
     tft.setFont(&lgfx::fonts::Font7);
     tft.setTextColor(WHITE);
     tft.setTextDatum(middle_center);
-    
     char buf[16];
-    snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
-    tft.drawString(buf, 64, TIME_Y + TIME_H / 2);
+    snprintf(buf, sizeof(buf), "%02d:%02d", displayH, m);
+    tft.drawString(buf, 46, TIME_Y + TIME_H / 2);
+    
+    // ===== AM/PM（右上） =====
+    tft.setFont(&lgfx::fonts::Font2);
+    tft.setTextColor(DIM_TEXT);
+    tft.setTextDatum(top_right);
+    tft.drawString(period, 128, TIME_Y - 10);
+    
+    // ===== 秒数（右下） =====
+    tft.setTextColor(ACCENT_COLOR);
+    tft.setTextDatum(bottom_right);
+    char secBuf[8];
+    snprintf(secBuf, sizeof(secBuf), "%02d", s);
+    tft.drawString(secBuf, 128, TIME_Y + TIME_H + 8);
     
     if (ENABLE_DEBUG) {
         debugPrint("时间", TIME_Y, TIME_H, &lgfx::fonts::Font7, buf);
@@ -171,14 +204,13 @@ void drawTime(int h, int m, bool force) {
     
     lastH = h;
     lastM = m;
+    lastS = s;
 }
 
 // ============================================================================
 // 辅助函数：绘制日期
 // ============================================================================
 void drawDate(int year, int month, int day, int wday, bool force) {
-    static int lastDay = -1, lastWday = -1;
-    
     if (!force && day == lastDay && wday == lastWday) return;
     
     clearRectDebug(0, DATE_Y, 128, DATE_H, "日期");
@@ -221,10 +253,10 @@ void drawSensorRow(
     uint16_t color2,
     bool force
 ) {
-    static float lastValues[4] = {-999, -999, -999, -999};
     int idx = 0;
     if (y == SENSOR1_Y) idx = 0;
     else if (y == SENSOR2_Y) idx = 2;
+    else return;
     
     bool changed = (force || value1 != lastValues[idx] || value2 != lastValues[idx + 1]);
     if (!changed) return;
@@ -268,8 +300,6 @@ void drawSensorRow(
 // 辅助函数：绘制底部状态
 // ============================================================================
 void drawBottomStatus(unsigned long uptime, bool force) {
-    static int lastSeconds = -1;
-    
     int seconds = (int)(uptime / 1000);
     if (!force && seconds == lastSeconds) return;
     
@@ -379,30 +409,61 @@ void printLayoutInfo() {
 }
 
 // ============================================================================
-// 主绘制函数
+// 公共接口函数实现
 // ============================================================================
+
+// 初始化时钟页面
+void initClockPage() {
+    // 重置所有缓存变量
+    lastWifi = false;
+    lastRssi = 999;
+    lastNtp = false;
+    lastH = -1;
+    lastM = -1;
+    lastS = -1;
+    lastDay = -1;
+    lastWday = -1;
+    for (int i = 0; i < 4; i++) {
+        lastValues[i] = -999;
+    }
+    lastSeconds = -1;
+    initialized = true;
+    
+    Serial.println("[ClockPage] 初始化完成");
+}
+
+// 完整绘制时钟页面（页面切换时调用）
 void drawClockPage() {
     struct tm timeinfo;
     getLocalTime(&timeinfo);
     
     int h = timeinfo.tm_hour;
     int m = timeinfo.tm_min;
+    int s = timeinfo.tm_sec;
     int year = timeinfo.tm_year + 1900;
     int month = timeinfo.tm_mon + 1;
     int day = timeinfo.tm_mday;
     int wday = timeinfo.tm_wday;
     
+    // 更新传感器数据
+    dht1.update();
+    dht2.update();
+    
+    float temp1 = dht1.getTemperature();
+    float hum1  = dht1.getHumidity();
+    float temp2 = dht2.getTemperature();
+    float hum2  = dht2.getHumidity();
+    
+    // 如果传感器无效，使用上次有效值
     static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
-    
-    float temp1 = dht1.readTemperature();
-    float hum1  = dht1.readHumidity();
-    float temp2 = dht2.readTemperature();
-    float hum2  = dht2.readHumidity();
-    
-    if (isnan(temp1)) temp1 = prevT1;
-    if (isnan(hum1))  hum1  = prevH1;
-    if (isnan(temp2)) temp2 = prevT2;
-    if (isnan(hum2))  hum2  = prevH2;
+    if (!dht1.isValid()) {
+        temp1 = prevT1;
+        hum1  = prevH1;
+    }
+    if (!dht2.isValid()) {
+        temp2 = prevT2;
+        hum2  = prevH2;
+    }
     
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();
@@ -413,28 +474,74 @@ void drawClockPage() {
         layoutPrinted = true;
     }
     
-    static bool lastForce = false;
-    if (forcePageRedraw && !lastForce) {
-        drawStatusBar(wifiConnected, rssi, timeSynced, true);
-        drawTime(h, m, true);
-        drawDate(year, month, day, wday, true);
-        drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, true);
-        drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, true);
-        drawBottomStatus(millis(), true);
-        
-        prevT1 = temp1; prevH1 = hum1; prevT2 = temp2; prevH2 = hum2;
-    }
-    lastForce = forcePageRedraw;
+    // ---- 完整重绘所有内容（force = true） ----
+    drawStatusBar(wifiConnected, rssi, timeSynced, true);
+    drawTime(h, m, s, true);
+    drawDate(year, month, day, wday, true);
+    drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, true);
+    drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, true);
+    drawBottomStatus(millis(), true);
     
-    drawStatusBar(wifiConnected, rssi, timeSynced, forcePageRedraw);
-    drawTime(h, m, forcePageRedraw);
-    drawDate(year, month, day, wday, forcePageRedraw);
-    drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, forcePageRedraw);
-    drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, forcePageRedraw);
-    drawBottomStatus(millis(), forcePageRedraw);
-    
+    // 保存当前值供后续增量更新使用
     prevT1 = temp1;
     prevH1 = hum1;
     prevT2 = temp2;
     prevH2 = hum2;
+    
+    Serial.println("[ClockPage] 完整绘制完成");
+}
+
+// 更新时钟页面动态内容（每秒调用）
+void updateClockPage() {
+    // 获取当前时间
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        return;  // 获取时间失败，跳过更新
+    }
+    
+    int h = timeinfo.tm_hour;
+    int m = timeinfo.tm_min;
+    int s = timeinfo.tm_sec;
+    int year = timeinfo.tm_year + 1900;
+    int month = timeinfo.tm_mon + 1;
+    int day = timeinfo.tm_mday;
+    int wday = timeinfo.tm_wday;
+    
+    // 更新传感器数据
+    dht1.update();
+    dht2.update();
+    
+    float temp1 = dht1.getTemperature();
+    float hum1  = dht1.getHumidity();
+    float temp2 = dht2.getTemperature();
+    float hum2  = dht2.getHumidity();
+    
+    // 如果传感器无效，使用上次有效值
+    static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
+    if (!dht1.isValid()) {
+        temp1 = prevT1;
+        hum1  = prevH1;
+    }
+    if (!dht2.isValid()) {
+        temp2 = prevT2;
+        hum2  = prevH2;
+    }
+    
+    // 更新前保存旧值（供下次使用）
+    prevT1 = temp1;
+    prevH1 = hum1;
+    prevT2 = temp2;
+    prevH2 = hum2;
+    
+    // 获取 WiFi 状态
+    bool wifiConnected = wifiManager.isConnected();
+    int rssi = wifiManager.getRSSI();
+    
+    // ---- 只更新变化的部分（force = false，让子函数判断是否需要更新） ----
+    drawStatusBar(wifiConnected, rssi, timeSynced, false);
+    drawTime(h, m, s, false);
+    drawDate(year, month, day, wday, false);
+    drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, false);
+    drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, false);
+    drawBottomStatus(millis(), false);
 }
