@@ -368,6 +368,8 @@ void drawChartPage() {
     bool needFullDraw = forcePageRedraw || firstDraw;
     
     if (needFullDraw) {
+        sensorHistory1.reset();
+        sensorHistory2.reset();
         sensorHistory1.loadFromFile();
         sensorHistory2.loadFromFile();
         

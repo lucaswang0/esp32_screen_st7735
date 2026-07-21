@@ -8,6 +8,12 @@
 #include "ClockPage.h"
 #include "ChartPage.h"
 
+#include "MqttManager.h"
+
+// MQTT 配置
+#define MQTT_SERVER "10.45.1.3"  // 替换为你的服务器 IP
+#define MQTT_PORT 1883
+
 // ============================================================================
 // 引脚定义
 // ============================================================================
@@ -31,6 +37,7 @@
 #define WIFI_CHECK_INTERVAL     10000    // 10秒检查WiFi
 #define NTP_SYNC_INTERVAL       3600000 // 1小时同步NTP
 #define BACKLIGHT_PERCENT       80
+#define MQTT_FORCE_PUBLISH_INTERVAL 60000 // 60秒强制发布一次，即使数据未变化
 
 // ============================================================================
 // 全局对象
@@ -41,6 +48,8 @@ DHT11Sensor dht2(DHTPIN2);
 WiFiManager wifiManager;
 SensorHistory sensorHistory1("sensor1");
 SensorHistory sensorHistory2("sensor2");
+MqttManager mqtt;
+bool discoverySent = false;
 
 struct tm timeinfo;
 bool timeSynced = false;
@@ -202,6 +211,72 @@ void handleWiFi() {
     }
 }
 
+void sendDiscoveryMessages() {
+    // 温度传感器发现
+    mqtt.publish(
+        "homeassistant/sensor/esp32_temp1/config",
+        "{\"name\":\"ESP32 温度1\",\"state_topic\":\"esp32/sensor/temp1\",\"unit_of_measurement\":\"°C\",\"unique_id\":\"esp32_temp1\"}"
+    );
+    // 湿度传感器发现
+    mqtt.publish(
+        "homeassistant/sensor/esp32_hum1/config",
+        "{\"name\":\"ESP32 湿度1\",\"state_topic\":\"esp32/sensor/hum1\",\"unit_of_measurement\":\"%\",\"unique_id\":\"esp32_hum1\"}"
+    );
+    // 温度2
+    mqtt.publish(
+        "homeassistant/sensor/esp32_temp2/config",
+        "{\"name\":\"ESP32 温度2\",\"state_topic\":\"esp32/sensor/temp2\",\"unit_of_measurement\":\"°C\",\"unique_id\":\"esp32_temp2\"}"
+    );
+    // 湿度2
+    mqtt.publish(
+        "homeassistant/sensor/esp32_hum2/config",
+        "{\"name\":\"ESP32 湿度2\",\"state_topic\":\"esp32/sensor/hum2\",\"unit_of_measurement\":\"%\",\"unique_id\":\"esp32_hum2\"}"
+    );
+}
+
+void publishSensorData() {
+    static float lastT1 = -999, lastH1 = -999;
+    static float lastT2 = -999, lastH2 = -999;
+    static unsigned long lastForcePublish = 0;
+    
+    dht1.update();
+    dht2.update();
+    
+    float t1 = dht1.getTemperature();
+    float h1 = dht1.getHumidity();
+    float t2 = dht2.getTemperature();
+    float h2 = dht2.getHumidity();
+    
+    unsigned long now = millis();
+    bool forcePublish = (now - lastForcePublish >= MQTT_FORCE_PUBLISH_INTERVAL);
+    
+    if (forcePublish) {
+        lastForcePublish = now;
+    }
+    
+    // 数据变化时发布，或强制发布间隔到达时发布
+    if (forcePublish || t1 != lastT1) {
+        mqtt.publish("esp32/sensor/temp1", t1);
+        lastT1 = t1;
+    }
+    if (forcePublish || h1 != lastH1) {
+        mqtt.publish("esp32/sensor/hum1", h1);
+        lastH1 = h1;
+    }
+    if (forcePublish || t2 != lastT2) {
+        mqtt.publish("esp32/sensor/temp2", t2);
+        lastT2 = t2;
+    }
+    if (forcePublish || h2 != lastH2) {
+        mqtt.publish("esp32/sensor/hum2", h2);
+        lastH2 = h2;
+    }
+    
+    if (forcePublish) {
+        Serial.println("[MQTT] 定时强制发布传感器数据");
+    }
+}
+
 // ============================================================================
 // Setup
 // ============================================================================
@@ -239,7 +314,12 @@ void setup() {
     wifiManager.begin();
     if (wifiManager.connect()) {
         timeSynced = syncNTP();
-    } else {
+
+        // 初始化 MQTT（非阻塞，只设置服务器）
+        mqtt.begin(MQTT_SERVER, MQTT_PORT);
+        discoverySent = false;
+            
+} else {
         Serial.println("[WiFi] 进入 AP 配网模式");
         Serial.println("  热点: ESP32-Weather");
         Serial.println("  访问: 192.168.4.1");
@@ -269,6 +349,7 @@ void setup() {
     switchPage(0);
 }
 
+
 // ============================================================================
 // Loop
 // ============================================================================
@@ -284,10 +365,18 @@ void loop() {
     static int currentPage = 0;
     static bool initialDraw = true;
     static int lastRecordMinute = -1;
-    
-
 
     unsigned long now = millis();
+
+    // ---- MQTT 状态机（非阻塞） ----
+    mqtt.loop();
+    
+    // ---- 检测刚连接成功，发送发现消息 ----
+    if (mqtt.isJustConnected() && !discoverySent) {
+        Serial.println("[MQTT] 连接成功，发送发现消息...");
+        sendDiscoveryMessages();
+        discoverySent = true;
+    }
     
     // ---- LED指示灯控制 ----
     if (wifiManager.isConnected()) {
@@ -300,34 +389,36 @@ void loop() {
         }
     }
     
-// ---- 1. 页面切换 (每10秒) ----
-if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
-    lastPageSwitch = now;
-    currentPage = 1 - currentPage;
-    forcePageRedraw = true;  // ← 设置为 true
-    drawBg();  // 清屏
-    
-    // 完整绘制页面（强制重绘所有内容）
-    if (currentPage == 0) {
-        drawClockPage();  // 内部会使用 forcePageRedraw = true
-    } else {
-        drawChartPage();
+    // ---- 1. 页面切换 (每10秒) ----
+    if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
+        lastPageSwitch = now;
+        currentPage = 1 - currentPage;
+        forcePageRedraw = true;
+        drawBg();
+        
+        if (currentPage == 0) {
+            drawClockPage();
+        } else {
+            drawChartPage();
+        }
+        Serial.printf("[Page] 切换到页面 %d\n", currentPage);
     }
-    // forcePageRedraw = false; 
-    Serial.printf("[Page] 切换到页面 %d\n", currentPage);
-}
 
-// ---- 2. 每秒刷新 (只更新动态部分) ----
-if (now - lastSecond >= 1000) {
-    if (currentPage == 0) {
-        updateClockPage();  // 只更新动态内容（时间、传感器等）
-    } else {
-        updateChartPage();  // 只更新图表数据
+    // ---- 2. 每秒刷新 (只更新动态部分) ----
+    if (now - lastSecond >= 1000) {
+        if (currentPage == 0) {
+            updateClockPage();
+        } else {
+            updateChartPage();
+        }
+        if (mqtt.isConnected()) {
+            publishSensorData();  // 发布传感器数据
+            // Serial.println("[MQTT] 发布传感器数据,有变化时才发送");
+        }
+        lastSecond = now;
+        forcePageRedraw = false;
+
     }
-    lastSecond = now;
-        // ✅ 在每秒刷新完成后重置 forcePageRedraw
-    forcePageRedraw = false;
-}
 
 // // ---- 3. 定期完整刷新（防止显示异常，可选） ----
 // if (now - lastFullRedraw >= 60000) {  // 每60秒完整重绘一次

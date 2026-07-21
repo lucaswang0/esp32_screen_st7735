@@ -180,10 +180,14 @@ void drawTime(int h, int m, int s, bool force) {
     // ===== 时间（居中偏左） =====
     tft.setFont(&lgfx::fonts::Font7);
     tft.setTextColor(WHITE);
-    tft.setTextDatum(middle_center);
+    tft.setTextDatum(middle_right);
     char buf[16];
-    snprintf(buf, sizeof(buf), "%02d:%02d", displayH, m);
-    tft.drawString(buf, 46, TIME_Y + TIME_H / 2);
+    if (displayH <= 9) {
+        snprintf(buf, sizeof(buf), "%d:%02d", displayH, m);
+    } else {
+        snprintf(buf, sizeof(buf), "%02d:%02d", displayH, m);
+    }
+    tft.drawString(buf, 124, TIME_Y + TIME_H / 2);
     
     // ===== AM/PM（右上） =====
     tft.setFont(&lgfx::fonts::Font2);
@@ -196,7 +200,7 @@ void drawTime(int h, int m, int s, bool force) {
     tft.setTextDatum(bottom_right);
     char secBuf[8];
     snprintf(secBuf, sizeof(secBuf), "%02d", s);
-    tft.drawString(secBuf, 128, TIME_Y + TIME_H + 8);
+    tft.drawString(secBuf, 128, TIME_Y + TIME_H + 10);
     
     if (ENABLE_DEBUG) {
         debugPrint("时间", TIME_Y, TIME_H, &lgfx::fonts::Font7, buf);
