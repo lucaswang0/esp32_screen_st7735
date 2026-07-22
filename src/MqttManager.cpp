@@ -4,7 +4,6 @@
 extern WiFiManager wifiManager;
 
 MqttManager::MqttManager() {
-    // 设置回调
     _client.onConnect([this](bool sessionPresent) { onConnect(sessionPresent); });
     _client.onDisconnect([this](AsyncMqttClientDisconnectReason reason) { onDisconnect(reason); });
     _client.onPublish([this](uint16_t packetId) { onPublish(packetId); });
@@ -24,25 +23,146 @@ void MqttManager::begin(const char* server, int port) {
     _client.setCleanSession(true);
     
     _justConnected = false;
+    transitionTo(MQTT_STATE_IDLE);
     
-    Serial.printf("[MQTT] 服务器: %s:%d\n", server, port);
+    Serial.printf("[MQTT] 初始化服务器: %s:%d\n", server, port);
     
-    // WiFi 已连接时立即尝试连接
     if (wifiManager.isConnected()) {
-        connect();
+        transitionTo(MQTT_STATE_CONNECTING);
+        tryConnect();
     }
 }
 
 void MqttManager::loop() {
-    // AsyncMqttClient 内部事件驱动，不需要轮询
-    // 保留空函数以兼容 main.cpp 的调用
-    if (wifiManager.isConnected() && !_client.connected()) {
-        connect();
+    unsigned long now = millis();
+
+    // 1. 基础检查：Wi-Fi 必须连接
+    if (!wifiManager.isConnected()) {
+        if (_state != MQTT_STATE_IDLE) {
+            Serial.println("[MQTT] Wi-Fi 断开，挂起连接状态机");
+            transitionTo(MQTT_STATE_IDLE);
+        }
+        return;
+    }
+
+    // 2. 状态机处理
+    switch (_state) {
+        case MQTT_STATE_IDLE:
+            // 如果处于 IDLE 且未连接，立即尝试连接
+            if (!_client.connected()) {
+                transitionTo(MQTT_STATE_CONNECTING);
+                tryConnect();
+            }
+            break;
+
+        case MQTT_STATE_WAITING:
+            // 检查是否到达下一次重试时间点
+            if (now >= _nextRetryAt) {
+                Serial.printf("[MQTT] 重试间隔结束，尝试第 %d 次连接...\n", _retryCount + 1);
+                transitionTo(MQTT_STATE_CONNECTING);
+                tryConnect();
+            }
+            break;
+
+        case MQTT_STATE_CONNECTING:
+            // 检查连接是否超时
+            if (now - _stateEnterTime >= CONNECT_TIMEOUT_MS) {
+                Serial.println("[MQTT] 连接尝试超时，准备进入退避等待");
+                scheduleNextRetry();
+            }
+            break;
+
+        case MQTT_STATE_CONNECTED:
+            // 正常连接状态，无需处理
+            break;
+
+        case MQTT_STATE_SLEEPING:
+            // 检查是否到达定时唤醒时间
+            if (now - _stateEnterTime >= SLEEP_WAKEUP_MS) {
+                Serial.println("[MQTT] 休眠期满，定时唤醒重试...");
+                resetRetry();
+                transitionTo(MQTT_STATE_CONNECTING);
+                tryConnect();
+            }
+            break;
     }
 }
 
+void MqttManager::transitionTo(MqttConnState newState) {
+    if (_state == newState) return;
+    
+    _state = newState;
+    _stateEnterTime = millis();
+    
+    const char* stateNames[] = {"IDLE", "WAITING", "CONNECTING", "CONNECTED", "SLEEPING"};
+    Serial.printf("[MQTT] 状态切换: %s -> %s\n", "...", stateNames[newState]); // 这里简化处理
+}
+
+void MqttManager::tryConnect() {
+    if (!_client.connected()) {
+        _client.connect();
+    }
+}
+
+void MqttManager::scheduleNextRetry() {
+    _retryCount++;
+    if (_retryCount > MAX_RETRY_COUNT) {
+        enterSleep();
+    } else {
+        unsigned long backoff = getCurrentBackoff();
+        _nextRetryAt = millis() + backoff;
+        Serial.printf("[MQTT] 连接失败，%d s 后重试 (次数: %d/%d)\n", backoff/1000, _retryCount, MAX_RETRY_COUNT);
+        transitionTo(MQTT_STATE_WAITING);
+    }
+}
+
+unsigned long MqttManager::getCurrentBackoff() const {
+    // 指数退避: INITIAL * 2^(retry-1)
+    unsigned long backoff = INITIAL_BACKOFF_MS * (1UL << (_retryCount - 1));
+    return (backoff > MAX_BACKOFF_MS) ? MAX_BACKOFF_MS : backoff;
+}
+
+void MqttManager::enterSleep() {
+    Serial.println("[MQTT] 达到最大重试次数，进入休眠状态 (5min 后自动唤醒)");
+    transitionTo(MQTT_STATE_SLEEPING);
+}
+
+void MqttManager::resetRetry() {
+    _retryCount = 0;
+}
+
+void MqttManager::wakeup() {
+    if (_state == MQTT_STATE_SLEEPING) {
+        Serial.println("[MQTT] 收到手动唤醒指令");
+        resetRetry();
+        transitionTo(MQTT_STATE_CONNECTING);
+        tryConnect();
+    }
+}
+
+void MqttManager::onConnect(bool sessionPresent) {
+    _justConnected = true;
+    _retryCount = 0; // 连接成功，重置重试计数
+    transitionTo(MQTT_STATE_CONNECTED);
+    Serial.println("[MQTT] ✅ 连接成功");
+}
+
+void MqttManager::onDisconnect(AsyncMqttClientDisconnectReason reason) {
+    Serial.printf("[MQTT] 断开连接, 原因: %d\n", (int)reason);
+    _justConnected = false;
+    
+    // 如果不是主动断开，则进入重试流程
+    if (_state == MQTT_STATE_CONNECTED) {
+        scheduleNextRetry();
+    }
+}
+
+void MqttManager::onPublish(uint16_t packetId) {
+    // 发布确认
+}
+
 bool MqttManager::isConnected() const {
-    return _client.connected();
+    return _state == MQTT_STATE_CONNECTED && _client.connected();
 }
 
 bool MqttManager::isJustConnected() {
@@ -54,7 +174,7 @@ bool MqttManager::isJustConnected() {
 }
 
 void MqttManager::publish(const char* topic, const char* payload) {
-    if (_client.connected()) {
+    if (isConnected()) {
         _client.publish(topic, 1, true, payload);
     } else {
         Serial.printf("[MQTT] 未连接，无法发布: %s\n", topic);
@@ -73,17 +193,12 @@ void MqttManager::setAutoDiscovery(bool enable) {
 
 void MqttManager::sendDiscovery(const char* name, const char* deviceClass,
                                  const char* unitOfMeasurement, const char* stateTopic) {
-    if (!_client.connected()) {
+    if (!isConnected()) {
         Serial.println("[MQTT] 未连接，无法发送发现消息");
         return;
     }
     
-    // 构建发现主题
-    String configTopic = _baseTopic + "/sensor/";
-    configTopic += stateTopic;
-    configTopic += "/config";
-    
-    // 构建 JSON 消息
+    String configTopic = _baseTopic + "/sensor/" + String(stateTopic) + "/config";
     String payload = "{";
     payload += "\"name\":\"" + String(name) + "\",";
     payload += "\"state_topic\":\"" + String(stateTopic) + "\",";
@@ -106,25 +221,9 @@ void MqttManager::sendDiscovery(const char* name, const char* deviceClass,
     }
 }
 
-void MqttManager::connect() {
-    if (!_client.connected() && wifiManager.isConnected()) {
-        Serial.println("[MQTT] 尝试连接...");
-        _client.connect();
+unsigned long MqttManager::getNextRetryIn() const {
+    if (_state == MQTT_STATE_WAITING) {
+        return (_nextRetryAt > millis()) ? (_nextRetryAt - millis()) : 0;
     }
-}
-
-void MqttManager::onConnect(bool sessionPresent) {
-    _justConnected = true;
-    Serial.println("[MQTT] ✅ 连接成功");
-}
-
-void MqttManager::onDisconnect(AsyncMqttClientDisconnectReason reason) {
-    Serial.printf("[MQTT] 断开连接, 原因: %d\n", (int)reason);
-    _justConnected = false;
-    // AsyncMqttClient 会自动重连，但我们在 loop() 中也做一次保险
-}
-
-void MqttManager::onPublish(uint16_t packetId) {
-    // 可选：发布确认回调
-    // Serial.printf("[MQTT] 发布确认 packetId=%u\n", packetId);
+    return 0;
 }

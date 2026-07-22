@@ -6,6 +6,7 @@
 #include "WiFiManager.h"
 #include "SensorHistory.h"
 #include "ClockPage.h"
+#include "FlipClockPage.h"
 #include "ChartPage.h"
 
 #include "MqttManager.h"
@@ -186,6 +187,8 @@ void switchPage(int page) {
     
     if (page == 0) {
         drawClockPage();
+    } else if (page == 1) {
+        drawFlipClockPage();
     } else {
         drawChartPage();
     }
@@ -338,6 +341,9 @@ void setup() {
     // ---- 初始化时钟页面 ----
     initClockPage();
     
+    // ---- 初始化翻页时钟页面 ----
+    initFlipClockPage();
+    
     // ---- 初始化图表页面 ----
     initChartPage();
     
@@ -361,6 +367,7 @@ void loop() {
     static unsigned long lastNtpSync = 0;
     static unsigned long lastBacklightCheck = 0;
     static unsigned long lastLedToggle = 0;
+    static unsigned long lastRender = 0;
     static bool ledState = false;
     static int currentPage = 0;
     static bool initialDraw = true;
@@ -392,10 +399,9 @@ void loop() {
     // ---- 1. 页面切换 (每10秒) ----
     if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
         lastPageSwitch = now;
-        currentPage = 1 - currentPage;
+        currentPage = (currentPage + 1) % 1;
         forcePageRedraw = true;
         drawBg();
-        
         if (currentPage == 0) {
             drawClockPage();
         } else {
@@ -412,12 +418,15 @@ void loop() {
             updateChartPage();
         }
         if (mqtt.isConnected()) {
-            publishSensorData();  // 发布传感器数据
-            // Serial.println("[MQTT] 发布传感器数据,有变化时才发送");
+            publishSensorData();
         }
         lastSecond = now;
         forcePageRedraw = false;
-
+    }
+    
+    // ---- 2.5 翻页时钟动画渲染 (20FPS) ----
+    if (currentPage == 0) {
+        renderFlipClockWidgetAnimation();
     }
 
 // // ---- 3. 定期完整刷新（防止显示异常，可选） ----
