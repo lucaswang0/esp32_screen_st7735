@@ -1,9 +1,10 @@
 # Weather Clock - ESP32-C3 ST7735 温湿度时钟
 
-基于 ESP32-C3 和 ST7735 1.44" 128×128 TFT 显示屏的温湿度时钟项目。
+基于 ESP32-C3 和 ST7735 1.44" 128×128 TFT 显示屏的温湿度时钟项目，带有翻页时钟动画效果。
 
 ## 功能特性
 
+- **翻页时钟显示**：首页时间采用翻页动画效果，显示完整的 HH:MM:SS
 - **双页面轮换显示**：时钟页面和图表页面每 10 秒自动切换
 - **实时温湿度监测**：支持两个 DHT11 传感器
 - **WiFi 配网**：支持 AP 配网模式，首次连接失败自动开启热点
@@ -42,7 +43,7 @@
 ┌────────────────────────────────┐
 │ WiFi● -65      NTP●            │ ← 状态栏 (WiFi状态+RSSI/NTP状态)
 ├────────────────────────────────┤
-│          14:30                 │ ← 大字体时间 (Font7)
+│          14:30:56              │ ← 翻页时钟 (HH:MM:SS 翻页动画)
 ├────────────────────────────────┤
 │ 2026/07/14           周一      │ ← 日期卡片 (年/月/日 | 星期)
 ├────────────────────────────────┤
@@ -85,16 +86,19 @@ src/
 ├── Display.cpp        # 显示工具函数 (drawBg, clearRect)
 ├── ClockPage.h        # 时钟页面声明
 ├── ClockPage.cpp      # 时钟页面绘制逻辑
+├── FlipClockPage.h    # 翻页时钟声明
+├── FlipClockPage.cpp  # 翻页时钟动画实现
 ├── ChartPage.h        # 图表页面声明
 ├── ChartPage.cpp      # 图表页面绘制逻辑
 ├── SensorHistory.h    # 传感器历史数据类
 ├── SensorHistory.cpp  # 传感器数据存储与文件读写
 ├── WiFiManager.h      # WiFi 管理类声明
 ├── WiFiManager.cpp    # WiFi 连接与维护
-├── WiFiConfigManager.h # WiFi 配置管理声明
-├── WiFiConfigManager.cpp # WiFi AP 配网与凭据存储
+├── MqttManager.h      # MQTT 管理类声明
+├── MqttManager.cpp    # MQTT 消息发布
 ├── DHT11Sensor.h      # DHT11 传感器类声明
 ├── DHT11Sensor.cpp    # DHT11 传感器驱动
+├── digitals.h         # 翻页时钟数字位图数据
 └── main.cpp           # 主程序入口
 ```
 
@@ -166,6 +170,7 @@ platformio run --target upload
 
 - LovyanGFX 1.2.21
 - DHT sensor library 1.4.7
+- AsyncMqttClient 0.9.0
 - SPIFFS 2.0.0
 - WiFi 2.0.0
 - Preferences 2.0.0
