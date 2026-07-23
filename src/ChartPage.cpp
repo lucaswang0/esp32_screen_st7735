@@ -1,6 +1,7 @@
 #include "ChartPage.h"
 #include "Display.h"
 #include "DHT11Sensor.h"
+#include "SharedState.h"
 #include <time.h>
 #include "SensorHistory.h"
 
@@ -327,24 +328,16 @@ static float s_prevT2 = -999, s_prevH2 = -999;
 
 // 读取并缓存传感器数据（无效或 0 时使用上次的值）
 static void readAndCacheSensors() {
-    dht1.update();
-    dht2.update();
+    SensorSnapshot snap = getSensorSnapshot();
+    s_temp1 = snap.t1;
+    s_hum1  = snap.h1;
+    s_temp2 = snap.t2;
+    s_hum2  = snap.h2;
 
-    s_temp1 = dht1.getTemperature();
-    s_hum1  = dht1.getHumidity();
-    s_temp2 = dht2.getTemperature();
-    s_hum2  = dht2.getHumidity();
-
-    // 有效性检查：DHT11 温度范围 -20~60°C，湿度 1-100%RH
-    bool t1Ok = dht1.isValid() && s_temp1 >= -20 && s_temp1 <= 60;
-    bool h1Ok = dht1.isValid() && s_hum1  > 0 && s_hum1  <= 100;
-    bool t2Ok = dht2.isValid() && s_temp2 >= -20 && s_temp2 <= 60;
-    bool h2Ok = dht2.isValid() && s_hum2  > 0 && s_hum2  <= 100;
-
-    if (t1Ok) s_prevT1 = s_temp1; else if (s_prevT1 != -999) s_temp1 = s_prevT1;
-    if (h1Ok) s_prevH1 = s_hum1;  else if (s_prevH1 != -999) s_hum1  = s_prevH1;
-    if (t2Ok) s_prevT2 = s_temp2; else if (s_prevT2 != -999) s_temp2 = s_prevT2;
-    if (h2Ok) s_prevH2 = s_hum2;  else if (s_prevH2 != -999) s_hum2  = s_prevH2;
+    if (snap.t1Ok) s_prevT1 = s_temp1; else if (s_prevT1 != -999) s_temp1 = s_prevT1;
+    if (snap.h1Ok) s_prevH1 = s_hum1;  else if (s_prevH1 != -999) s_hum1  = s_prevH1;
+    if (snap.t2Ok) s_prevT2 = s_temp2; else if (s_prevT2 != -999) s_temp2 = s_prevT2;
+    if (snap.h2Ok) s_prevH2 = s_hum2;  else if (s_prevH2 != -999) s_hum2  = s_prevH2;
 }
 
 // 重绘单个图表（标签栏 + 网格 + 曲线）

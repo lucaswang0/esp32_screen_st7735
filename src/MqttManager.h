@@ -3,6 +3,7 @@
 
 #include <AsyncMqttClient.h>
 #include <WiFi.h>
+#include <freertos/semphr.h>
 
 // MQTT 连接状态（与 AsyncMqttClient 内部状态分离，仅用于本类的重试策略）
 enum MqttConnState {

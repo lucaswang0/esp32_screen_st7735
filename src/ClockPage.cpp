@@ -1,6 +1,7 @@
 #include "ClockPage.h"
 #include "Display.h"
 #include "DHT11Sensor.h"
+#include "SharedState.h"
 #include <time.h>
 #include "WiFiManager.h"
 #include "FlipClockPage.h"
@@ -274,7 +275,7 @@ void initClockPage() {
 void drawClockPage() {
     struct tm timeinfo;
     getLocalTime(&timeinfo);
-    
+
     int h = timeinfo.tm_hour;
     int m = timeinfo.tm_min;
     int s = timeinfo.tm_sec;
@@ -282,32 +283,23 @@ void drawClockPage() {
     int month = timeinfo.tm_mon + 1;
     int day = timeinfo.tm_mday;
     int wday = timeinfo.tm_wday;
-    
-    dht1.update();
-    dht2.update();
-    
-    float temp1 = dht1.getTemperature();
-    float hum1  = dht1.getHumidity();
-    float temp2 = dht2.getTemperature();
-    float hum2  = dht2.getHumidity();
-    
+
+    SensorSnapshot snap = getSensorSnapshot();
+    float temp1 = snap.t1, hum1 = snap.h1, temp2 = snap.t2, hum2 = snap.h2;
+
     static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
-    bool t1Ok = dht1.isValid() && temp1 >= -20 && temp1 <= 60;
-    bool h1Ok = dht1.isValid() && hum1  > 0 && hum1  <= 100;
-    bool t2Ok = dht2.isValid() && temp2 >= -20 && temp2 <= 60;
-    bool h2Ok = dht2.isValid() && hum2  > 0 && hum2  <= 100;
-    if (!t1Ok && prevT1 != -999) temp1 = prevT1;
-    if (!h1Ok && prevH1 != -999) hum1  = prevH1;
-    if (!t2Ok && prevT2 != -999) temp2 = prevT2;
-    if (!h2Ok && prevH2 != -999) hum2  = prevH2;
-    if (t1Ok) prevT1 = temp1;
-    if (h1Ok) prevH1 = hum1;
-    if (t2Ok) prevT2 = temp2;
-    if (h2Ok) prevH2 = hum2;
-    
+    if (!snap.t1Ok && prevT1 != -999) temp1 = prevT1;
+    if (!snap.h1Ok && prevH1 != -999) hum1  = prevH1;
+    if (!snap.t2Ok && prevT2 != -999) temp2 = prevT2;
+    if (!snap.h2Ok && prevH2 != -999) hum2  = prevH2;
+    if (snap.t1Ok) prevT1 = temp1;
+    if (snap.h1Ok) prevH1 = hum1;
+    if (snap.t2Ok) prevT2 = temp2;
+    if (snap.h2Ok) prevH2 = hum2;
+
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();
-    
+
     drawStatusBar(wifiConnected, rssi, timeSynced, true);
     drawTime(h, m, s, true);
     drawDate(year, month, day, wday, true);
@@ -323,7 +315,7 @@ void updateClockPage() {
     if (!getLocalTime(&timeinfo)) {
         return;
     }
-    
+
     int h = timeinfo.tm_hour;
     int m = timeinfo.tm_min;
     int s = timeinfo.tm_sec;
@@ -331,28 +323,19 @@ void updateClockPage() {
     int month = timeinfo.tm_mon + 1;
     int day = timeinfo.tm_mday;
     int wday = timeinfo.tm_wday;
-    
-    dht1.update();
-    dht2.update();
-    
-    float temp1 = dht1.getTemperature();
-    float hum1  = dht1.getHumidity();
-    float temp2 = dht2.getTemperature();
-    float hum2  = dht2.getHumidity();
-    
+
+    SensorSnapshot snap = getSensorSnapshot();
+    float temp1 = snap.t1, hum1 = snap.h1, temp2 = snap.t2, hum2 = snap.h2;
+
     static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
-    bool t1Ok = dht1.isValid() && temp1 >= -20 && temp1 <= 60;
-    bool h1Ok = dht1.isValid() && hum1  > 0 && hum1  <= 100;
-    bool t2Ok = dht2.isValid() && temp2 >= -20 && temp2 <= 60;
-    bool h2Ok = dht2.isValid() && hum2  > 0 && hum2  <= 100;
-    if (!t1Ok && prevT1 != -999) temp1 = prevT1;
-    if (!h1Ok && prevH1 != -999) hum1  = prevH1;
-    if (!t2Ok && prevT2 != -999) temp2 = prevT2;
-    if (!h2Ok && prevH2 != -999) hum2  = prevH2;
-    if (t1Ok) prevT1 = temp1;
-    if (h1Ok) prevH1 = hum1;
-    if (t2Ok) prevT2 = temp2;
-    if (h2Ok) prevH2 = hum2;
+    if (!snap.t1Ok && prevT1 != -999) temp1 = prevT1;
+    if (!snap.h1Ok && prevH1 != -999) hum1  = prevH1;
+    if (!snap.t2Ok && prevT2 != -999) temp2 = prevT2;
+    if (!snap.h2Ok && prevH2 != -999) hum2  = prevH2;
+    if (snap.t1Ok) prevT1 = temp1;
+    if (snap.h1Ok) prevH1 = hum1;
+    if (snap.t2Ok) prevT2 = temp2;
+    if (snap.h2Ok) prevH2 = hum2;
 
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();

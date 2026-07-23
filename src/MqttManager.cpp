@@ -3,6 +3,9 @@
 
 extern WiFiManager wifiManager;
 
+// 用于保护 _justConnected 标志的互斥锁（check-and-clear 非原子）
+static portMUX_TYPE s_justConnectedMux = portMUX_INITIALIZER_UNLOCKED;
+
 MqttManager::MqttManager() {
     _client.onConnect([this](bool sessionPresent) { onConnect(sessionPresent); });
     _client.onDisconnect([this](AsyncMqttClientDisconnectReason reason) { onDisconnect(reason); });
@@ -149,7 +152,10 @@ void MqttManager::wakeup() {
 }
 
 void MqttManager::onConnect(bool sessionPresent) {
+    // 临界区保护 _justConnected（与 isJustConnected 的 check-and-clear 互斥）
+    portENTER_CRITICAL(&s_justConnectedMux);
     _justConnected = true;
+    portEXIT_CRITICAL(&s_justConnectedMux);
     _retryCount = 0; // 连接成功，重置重试计数
     transitionTo(MQTT_STATE_CONNECTED);
     Serial.println("[MQTT] ✅ 连接成功");
@@ -157,8 +163,11 @@ void MqttManager::onConnect(bool sessionPresent) {
 
 void MqttManager::onDisconnect(AsyncMqttClientDisconnectReason reason) {
     Serial.printf("[MQTT] 断开连接, 原因: %d\n", (int)reason);
+    // 临界区保护 _justConnected（与 isJustConnected 的 check-and-clear 互斥）
+    portENTER_CRITICAL(&s_justConnectedMux);
     _justConnected = false;
-    
+    portEXIT_CRITICAL(&s_justConnectedMux);
+
     // 主动断开（外部调用 disconnect）不重试
     // CONNECT_TIMEOUT_MS 内由 loop() 处理的超时也不需要这里处理
     if (_state == MQTT_STATE_CONNECTED || _state == MQTT_STATE_CONNECTING) {
@@ -175,11 +184,12 @@ bool MqttManager::isConnected() const {
 }
 
 bool MqttManager::isJustConnected() {
-    if (_justConnected) {
-        _justConnected = false;
-        return true;
-    }
-    return false;
+    // 临界区保护 check-and-clear（防止与 onConnect/onDisconnect 竞争）
+    portENTER_CRITICAL(&s_justConnectedMux);
+    bool was = _justConnected;
+    _justConnected = false;
+    portEXIT_CRITICAL(&s_justConnectedMux);
+    return was;
 }
 
 void MqttManager::publish(const char* topic, const char* payload) {

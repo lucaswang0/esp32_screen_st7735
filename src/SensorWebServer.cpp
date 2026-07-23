@@ -2,6 +2,7 @@
 #include <WebServer.h>
 #include "DHT11Sensor.h"
 #include "WiFiManager.h"
+#include "SharedState.h"
 #include <time.h>
 
 extern DHT11Sensor dht1;
@@ -301,28 +302,19 @@ void SensorWebServer::handleNotFound() {
 }
 
 String SensorWebServer::buildCurrentJson() const {
-    dht1.update();
-    dht2.update();
-
-    float t1 = dht1.getTemperature();
-    float h1 = dht1.getHumidity();
-    float t2 = dht2.getTemperature();
-    float h2 = dht2.getHumidity();
+    SensorSnapshot snap = getSensorSnapshot();
+    float t1 = snap.t1, h1 = snap.h1, t2 = snap.t2, h2 = snap.h2;
 
     // 有效性检查：DHT11 温度 -20~60°C，湿度 1-100%RH
     static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
-    bool t1Ok = dht1.isValid() && t1 >= -20 && t1 <= 60;
-    bool h1Ok = dht1.isValid() && h1 > 0 && h1 <= 100;
-    bool t2Ok = dht2.isValid() && t2 >= -20 && t2 <= 60;
-    bool h2Ok = dht2.isValid() && h2 > 0 && h2 <= 100;
-    if (!t1Ok && prevT1 != -999) t1 = prevT1;
-    if (!h1Ok && prevH1 != -999) h1 = prevH1;
-    if (!t2Ok && prevT2 != -999) t2 = prevT2;
-    if (!h2Ok && prevH2 != -999) h2 = prevH2;
-    if (t1Ok) prevT1 = t1;
-    if (h1Ok) prevH1 = h1;
-    if (t2Ok) prevT2 = t2;
-    if (h2Ok) prevH2 = h2;
+    if (!snap.t1Ok && prevT1 != -999) t1 = prevT1;
+    if (!snap.h1Ok && prevH1 != -999) h1 = prevH1;
+    if (!snap.t2Ok && prevT2 != -999) t2 = prevT2;
+    if (!snap.h2Ok && prevH2 != -999) h2 = prevH2;
+    if (snap.t1Ok) prevT1 = t1;
+    if (snap.h1Ok) prevH1 = h1;
+    if (snap.t2Ok) prevT2 = t2;
+    if (snap.h2Ok) prevH2 = h2;
 
     String json = "{";
     json += "\"temp1\":" + String(t1, 1) + ",";
@@ -359,7 +351,11 @@ void SensorWebServer::handleApiData() {
 }
 
 String SensorWebServer::buildHistoryJson(SensorHistory& history, const char* type) const {
-    // 从 history1 和 history2 中读取（用 _history1/_history2 成员）
+    // 在 history mutex 下读取（TaskSample 写入时持有该锁）
+    if (xSemaphoreTake(xHistoryMutex, pdMS_TO_TICKS(200)) != pdTRUE) {
+        return "{\"error\":\"busy\"}";
+    }
+
     int count = _history1->getCount();
     int count2 = _history2->getCount();
     int maxCount = count > count2 ? count : count2;
@@ -408,6 +404,7 @@ String SensorWebServer::buildHistoryJson(SensorHistory& history, const char* typ
     data1 += "]";
     data2 += "]";
 
+    xSemaphoreGive(xHistoryMutex);
     return "{\"labels\":" + labels + ",\"data1\":" + data1 + ",\"data2\":" + data2 + "}";
 }
 
