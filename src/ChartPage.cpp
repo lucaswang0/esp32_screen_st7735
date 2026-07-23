@@ -81,6 +81,11 @@ void getValueRange(SensorHistory& history1, SensorHistory& history2,
             minVal = 0;
             maxVal = 100;
         }
+    } else if (maxVal - minVal < 0.5f) {
+        // 数据全部相同或差异过小时，扩展范围
+        float center = (maxVal + minVal) / 2.0f;
+        minVal = center - 1.0f;
+        maxVal = center + 1.0f;
     }
     
     float range = maxVal - minVal;
@@ -137,8 +142,15 @@ void drawGrid(int chartY, int chartH, bool showLabels,
         int currentX = constrain((int)currentXf, 0, CHART_W - 2);
         tft.drawLine(currentX, chartY, currentX, chartY + chartH - 1, tft.color565(100, 100, 80));
         
+        // "现在"文字位置：靠右显示，避免被左边框裁剪
         tft.setTextColor(tft.color565(100, 200, 100));
-        tft.drawString("现在", currentX - 12, chartY + chartH - 8);
+        if (currentX < 20) {
+            tft.drawString("现在", currentX + 2, chartY + chartH - 8);
+        } else if (currentX > CHART_W - 24) {
+            tft.drawString("现在", currentX - 22, chartY + chartH - 8);
+        } else {
+            tft.drawString("现在", currentX - 12, chartY + chartH - 8);
+        }
     }
     
     for (int i = 0; i <= GRID_ROWS; i++) {
@@ -172,7 +184,7 @@ void drawDoubleCurve(
     int count1 = history1.getCount();
     int count2 = history2.getCount();
     
-    if (count1 < 2 || count2 < 2) return;
+    if (count1 < 1 && count2 < 1) return;
     
     struct tm timeinfo;
     getLocalTime(&timeinfo);
@@ -187,69 +199,44 @@ void drawDoubleCurve(
     float range = maxVal - minVal;
     if (range < 1.0f) range = 1.0f;
     
-    for (int i = 0; i < count1 - 1; i++) {
-        const SensorSample& s1 = history1.getSample(i);
-        const SensorSample& s2 = history1.getSample(i + 1);
-        
-        int sample1Minutes = s1.hour * 60 + s1.minute;
-        int sample2Minutes = s2.hour * 60 + s2.minute;
-        
-        if (sample2Minutes < firstMinutes || sample1Minutes > totalMinutes) {
-            continue;
-        }
-        
-        float x1f = ((float)(sample1Minutes - firstMinutes) / totalMinutes) * CHART_W;
-        float x2f = ((float)(sample2Minutes - firstMinutes) / totalMinutes) * CHART_W;
-        
-        x1f = constrain(x1f, 0.0f, (float)CHART_W);
-        x2f = constrain(x2f, 0.0f, (float)CHART_W);
-        
-        int x1 = (int)x1f;
-        int x2 = (int)x2f;
-        
-        float v1 = useTemp ? s1.temp : s1.humidity;
-        float v2 = useTemp ? s2.temp : s2.humidity;
-        
-        int y1 = chartY + chartH - 1 - (int)(((v1 - minVal) / range) * (chartH - 2));
-        int y2 = chartY + chartH - 1 - (int)(((v2 - minVal) / range) * (chartH - 2));
-        
-        y1 = constrain(y1, chartY, chartY + chartH - 1);
-        y2 = constrain(y2, chartY, chartY + chartH - 1);
-        
-        tft.drawLine(x1, y1, x2, y2, color1);
-    }
+    int chartBottom = chartY + chartH - 1;
     
-    for (int i = 0; i < count2 - 1; i++) {
-        const SensorSample& s1 = history2.getSample(i);
-        const SensorSample& s2 = history2.getSample(i + 1);
-        
-        int sample1Minutes = s1.hour * 60 + s1.minute;
-        int sample2Minutes = s2.hour * 60 + s2.minute;
-        
-        if (sample2Minutes < firstMinutes || sample1Minutes > totalMinutes) {
-            continue;
+    auto drawHistoryCurve = [&](SensorHistory& history, int count, uint16_t color) {
+        for (int i = 0; i < count - 1; i++) {
+            const SensorSample& s1 = history.getSample(i);
+            const SensorSample& s2 = history.getSample(i + 1);
+            
+            int sample1Minutes = s1.hour * 60 + s1.minute;
+            int sample2Minutes = s2.hour * 60 + s2.minute;
+            
+            if (sample2Minutes < firstMinutes || sample1Minutes > totalMinutes) {
+                continue;
+            }
+            
+            float x1f = ((float)(sample1Minutes - firstMinutes) / totalMinutes) * CHART_W;
+            float x2f = ((float)(sample2Minutes - firstMinutes) / totalMinutes) * CHART_W;
+            
+            x1f = constrain(x1f, 0.0f, (float)CHART_W);
+            x2f = constrain(x2f, 0.0f, (float)CHART_W);
+            
+            int x1 = (int)x1f;
+            int x2 = (int)x2f;
+            
+            float v1 = useTemp ? s1.temp : s1.humidity;
+            float v2 = useTemp ? s2.temp : s2.humidity;
+            
+            int y1 = chartBottom - (int)(((v1 - minVal) / range) * (chartH - 2));
+            int y2 = chartBottom - (int)(((v2 - minVal) / range) * (chartH - 2));
+            
+            y1 = constrain(y1, chartY, chartBottom);
+            y2 = constrain(y2, chartY, chartBottom);
+            
+            tft.drawLine(x1, y1, x2, y2, color);
         }
-        
-        float x1f = ((float)(sample1Minutes - firstMinutes) / totalMinutes) * CHART_W;
-        float x2f = ((float)(sample2Minutes - firstMinutes) / totalMinutes) * CHART_W;
-        
-        x1f = constrain(x1f, 0.0f, (float)CHART_W);
-        x2f = constrain(x2f, 0.0f, (float)CHART_W);
-        
-        int x1 = (int)x1f;
-        int x2 = (int)x2f;
-        
-        float v1 = useTemp ? s1.temp : s1.humidity;
-        float v2 = useTemp ? s2.temp : s2.humidity;
-        
-        int y1 = chartY + chartH - 1 - (int)(((v1 - minVal) / range) * (chartH - 2));
-        int y2 = chartY + chartH - 1 - (int)(((v2 - minVal) / range) * (chartH - 2));
-        
-        y1 = constrain(y1, chartY, chartY + chartH - 1);
-        y2 = constrain(y2, chartY, chartY + chartH - 1);
-        
-        tft.drawLine(x1, y1, x2, y2, color2);
-    }
+    };
+    
+    if (count1 >= 2) drawHistoryCurve(history1, count1, color1);
+    if (count2 >= 2) drawHistoryCurve(history2, count2, color2);
 }
 
 // ========== 绘制标签栏 ==========
@@ -332,90 +319,76 @@ void drawBottomData(int h, int m, int s, bool force) {
 }
 
 // ============================================================================
-// 主绘制函数
+// 共享的传感器值缓存（drawChartPage/updateChartPage 共用）
+// ============================================================================
+static float s_temp1 = 0, s_hum1 = 0, s_temp2 = 0, s_hum2 = 0;
+static float s_prevT1 = -999, s_prevH1 = -999;
+static float s_prevT2 = -999, s_prevH2 = -999;
+
+// 读取并缓存传感器数据（无效或 0 时使用上次的值）
+static void readAndCacheSensors() {
+    dht1.update();
+    dht2.update();
+
+    s_temp1 = dht1.getTemperature();
+    s_hum1  = dht1.getHumidity();
+    s_temp2 = dht2.getTemperature();
+    s_hum2  = dht2.getHumidity();
+
+    // 有效性检查：DHT11 温度范围 -20~60°C，湿度 1-100%RH
+    bool t1Ok = dht1.isValid() && s_temp1 >= -20 && s_temp1 <= 60;
+    bool h1Ok = dht1.isValid() && s_hum1  > 0 && s_hum1  <= 100;
+    bool t2Ok = dht2.isValid() && s_temp2 >= -20 && s_temp2 <= 60;
+    bool h2Ok = dht2.isValid() && s_hum2  > 0 && s_hum2  <= 100;
+
+    if (t1Ok) s_prevT1 = s_temp1; else if (s_prevT1 != -999) s_temp1 = s_prevT1;
+    if (h1Ok) s_prevH1 = s_hum1;  else if (s_prevH1 != -999) s_hum1  = s_prevH1;
+    if (t2Ok) s_prevT2 = s_temp2; else if (s_prevT2 != -999) s_temp2 = s_prevT2;
+    if (h2Ok) s_prevH2 = s_hum2;  else if (s_prevH2 != -999) s_hum2  = s_prevH2;
+}
+
+// 重绘单个图表（标签栏 + 网格 + 曲线）
+static void redrawChart(int y, int h, bool useTemp, uint16_t c1, uint16_t c2) {
+    clearRect(CHART_X, y, CHART_W, h);
+    drawGrid(y, h, true, sensorHistory1, sensorHistory2, useTemp);
+    drawDoubleCurve(y, h, sensorHistory1, sensorHistory2, c1, c2, useTemp);
+}
+
+// ============================================================================
+// 主绘制函数（页面切换时完整重绘）
 // ============================================================================
 void drawChartPage() {
     struct tm timeinfo;
     getLocalTime(&timeinfo);
     
-    static float prevT1 = -999, prevH1 = -999;
-    static float prevT2 = -999, prevH2 = -999;
-    
-    dht1.update();
-    dht2.update();
-    
-    float temp1 = dht1.getTemperature();
-    float hum1  = dht1.getHumidity();
-    float temp2 = dht2.getTemperature();
-    float hum2  = dht2.getHumidity();
-    
-    if (!dht1.isValid()) {
-        temp1 = prevT1;
-        hum1  = prevH1;
-    }
-    if (!dht2.isValid()) {
-        temp2 = prevT2;
-        hum2  = prevH2;
-    }
+    readAndCacheSensors();
     
     int h = timeinfo.tm_hour;
     int m = timeinfo.tm_min;
     int s = timeinfo.tm_sec;
     
-    static bool firstDraw = true;
+    // 重新加载历史数据
+    sensorHistory1.reset();
+    sensorHistory2.reset();
+    sensorHistory1.loadFromFile();
+    sensorHistory2.loadFromFile();
     
-    // 🔥 关键：forcePageRedraw 或 firstDraw 都触发完整绘制
-    bool needFullDraw = forcePageRedraw || firstDraw;
+    // 清空所有区域
+    clearRect(0, LABEL_Y, CHART_W, LABEL_H);
+    clearRect(CHART_X, CHART1_Y, CHART_W, CHART1_H);
+    clearRect(CHART_X, CHART2_Y, CHART_W, CHART2_H);
+    clearRect(0, BOTTOM_Y, CHART_W, BOTTOM_H);
     
-    if (needFullDraw) {
-        sensorHistory1.reset();
-        sensorHistory2.reset();
-        sensorHistory1.loadFromFile();
-        sensorHistory2.loadFromFile();
-        
-        // 清空所有区域
-        clearRect(0, LABEL_Y, CHART_W, LABEL_H);
-        clearRect(CHART_X, CHART1_Y, CHART_W, CHART1_H);
-        clearRect(CHART_X, CHART2_Y, CHART_W, CHART2_H);
-        clearRect(0, BOTTOM_Y, CHART_W, BOTTOM_H);
-        
-        firstDraw = false;
-        chartInitialized = true;
-        
-        Serial.println("[ChartPage] 完整绘制");
-    }
+    // 强制重绘标签和底部时间
+    drawLabels(s_temp1, s_temp2, s_hum1, s_hum2, true);
+    drawBottomData(h, m, s, true);
     
-    // 🔥 始终调用 drawLabels 和 drawBottomData，让它们内部判断是否更新
-    // 使用 needFullDraw 作为 force 参数，确保首次/切换时强制绘制
-    drawLabels(temp1, temp2, hum1, hum2, needFullDraw);
+    // 重绘两个图表
+    redrawChart(CHART1_Y, CHART1_H, true, ACCENT_COLOR, TFT_ORANGE);
+    redrawChart(CHART2_Y, CHART2_H, false, TFT_CYAN, GREEN);
     
-    static int lastS = -1;
-    if (needFullDraw || s != lastS) {
-        clearRect(CHART_X, CHART1_Y, CHART_W, CHART1_H);
-        drawGrid(CHART1_Y, CHART1_H, true, 
-                 sensorHistory1, sensorHistory2, true);
-        drawDoubleCurve(CHART1_Y, CHART1_H, 
-                        sensorHistory1, sensorHistory2, 
-                        ACCENT_COLOR, TFT_ORANGE, 
-                        true);
-        
-        clearRect(CHART_X, CHART2_Y, CHART_W, CHART2_H);
-        drawGrid(CHART2_Y, CHART2_H, true, 
-                 sensorHistory1, sensorHistory2, false);
-        drawDoubleCurve(CHART2_Y, CHART2_H, 
-                        sensorHistory1, sensorHistory2, 
-                        TFT_CYAN, GREEN, 
-                        false);
-        
-        lastS = s;
-    }
-    
-    drawBottomData(h, m, s, needFullDraw);
-    
-    prevT1 = temp1;
-    prevH1 = hum1;
-    prevT2 = temp2;
-    prevH2 = hum2;
+    chartInitialized = true;
+    Serial.println("[ChartPage] 完整绘制");
 }
 
 // ============================================================================
@@ -423,10 +396,6 @@ void drawChartPage() {
 // ============================================================================
 void initChartPage() {
     chartInitialized = false;
-    
-    sensorHistory1.loadFromFile();
-    sensorHistory2.loadFromFile();
-    
     Serial.println("[ChartPage] 初始化完成");
 }
 
@@ -449,55 +418,19 @@ void updateChartPage() {
     int m = timeinfo.tm_min;
     int s = timeinfo.tm_sec;
     
-    dht1.update();
-    dht2.update();
+    readAndCacheSensors();
     
-    float temp1 = dht1.getTemperature();
-    float hum1  = dht1.getHumidity();
-    float temp2 = dht2.getTemperature();
-    float hum2  = dht2.getHumidity();
-    
-    static float prevT1 = -999, prevH1 = -999;
-    static float prevT2 = -999, prevH2 = -999;
-    
-    if (!dht1.isValid()) {
-        temp1 = prevT1;
-        hum1  = prevH1;
-    }
-    if (!dht2.isValid()) {
-        temp2 = prevT2;
-        hum2  = prevH2;
-    }
-    
-    prevT1 = temp1;
-    prevH1 = hum1;
-    prevT2 = temp2;
-    prevH2 = hum2;
-    
-    // 更新标签栏（force=false，内部判断数值是否变化）
-    drawLabels(temp1, temp2, hum1, hum2, false);
+    // 更新标签栏（内部判断数值变化）
+    drawLabels(s_temp1, s_temp2, s_hum1, s_hum2, false);
     
     // 更新底部时间
     drawBottomData(h, m, s, false);
     
+    // 每秒重绘图表（曲线随当前时间游标移动）
     static int lastS = -1;
     if (s != lastS) {
-        clearRect(CHART_X, CHART1_Y, CHART_W, CHART1_H);
-        drawGrid(CHART1_Y, CHART1_H, true, 
-                 sensorHistory1, sensorHistory2, true);
-        drawDoubleCurve(CHART1_Y, CHART1_H, 
-                        sensorHistory1, sensorHistory2, 
-                        ACCENT_COLOR, TFT_ORANGE, 
-                        true);
-        
-        clearRect(CHART_X, CHART2_Y, CHART_W, CHART2_H);
-        drawGrid(CHART2_Y, CHART2_H, true, 
-                 sensorHistory1, sensorHistory2, false);
-        drawDoubleCurve(CHART2_Y, CHART2_H, 
-                        sensorHistory1, sensorHistory2, 
-                        TFT_CYAN, GREEN, 
-                        false);
-        
+        redrawChart(CHART1_Y, CHART1_H, true, ACCENT_COLOR, TFT_ORANGE);
+        redrawChart(CHART2_Y, CHART2_H, false, TFT_CYAN, GREEN);
         lastS = s;
     }
 }

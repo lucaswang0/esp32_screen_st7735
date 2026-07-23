@@ -52,6 +52,8 @@ static bool initialized = false;
 static bool lastWifi = false;
 static int lastRssi = 999;
 static bool lastNtp = false;
+static bool showIpMode = false;
+static unsigned long lastStatusSwitch = 0;
 
 static int lastH = -1, lastM = -1, lastS = -1;
 
@@ -99,6 +101,13 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
     bool wifiChanged = (wifiConnected != lastWifi || rssi != lastRssi);
     bool ntpChanged = (ntpOk != lastNtp);
     
+    unsigned long now = millis();
+    if (wifiConnected && (now - lastStatusSwitch >= 5000)) {
+        showIpMode = !showIpMode;
+        lastStatusSwitch = now;
+        force = true;
+    }
+    
     if (!force && !wifiChanged && !ntpChanged) return;
     
     clearRectDebug(0, STATUS_Y, 128, STATUS_H, "状态栏");
@@ -111,10 +120,17 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
     if (wifiConnected) {
         tft.setTextColor(GREEN);
         tft.drawString("●", 28, STATUS_Y);
-        char rssiBuf[6];
-        snprintf(rssiBuf, sizeof(rssiBuf), "%d", rssi);
-        tft.setTextColor(DIM_TEXT);
-        tft.drawString(rssiBuf, 38, STATUS_Y);
+        
+        if (showIpMode) {
+            String ip = wifiManager.getLocalIP();
+            tft.setTextColor(ACCENT_COLOR);
+            tft.drawString(ip, 38, STATUS_Y);
+        } else {
+            char rssiBuf[6];
+            snprintf(rssiBuf, sizeof(rssiBuf), "%d", rssi);
+            tft.setTextColor(DIM_TEXT);
+            tft.drawString(rssiBuf, 38, STATUS_Y);
+        }
     } else {
         tft.setTextColor(RED);
         tft.drawString("○", 28, STATUS_Y);
@@ -237,6 +253,8 @@ void initClockPage() {
     lastWifi = false;
     lastRssi = 999;
     lastNtp = false;
+    showIpMode = false;
+    lastStatusSwitch = millis();
     lastH = -1;
     lastM = -1;
     lastS = -1;
@@ -274,14 +292,18 @@ void drawClockPage() {
     float hum2  = dht2.getHumidity();
     
     static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
-    if (!dht1.isValid()) {
-        temp1 = prevT1;
-        hum1  = prevH1;
-    }
-    if (!dht2.isValid()) {
-        temp2 = prevT2;
-        hum2  = prevH2;
-    }
+    bool t1Ok = dht1.isValid() && temp1 >= -20 && temp1 <= 60;
+    bool h1Ok = dht1.isValid() && hum1  > 0 && hum1  <= 100;
+    bool t2Ok = dht2.isValid() && temp2 >= -20 && temp2 <= 60;
+    bool h2Ok = dht2.isValid() && hum2  > 0 && hum2  <= 100;
+    if (!t1Ok && prevT1 != -999) temp1 = prevT1;
+    if (!h1Ok && prevH1 != -999) hum1  = prevH1;
+    if (!t2Ok && prevT2 != -999) temp2 = prevT2;
+    if (!h2Ok && prevH2 != -999) hum2  = prevH2;
+    if (t1Ok) prevT1 = temp1;
+    if (h1Ok) prevH1 = hum1;
+    if (t2Ok) prevT2 = temp2;
+    if (h2Ok) prevH2 = hum2;
     
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();
@@ -292,12 +314,7 @@ void drawClockPage() {
     drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, true);
     drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, true);
     drawBottomStatus(millis(), true);
-    
-    prevT1 = temp1;
-    prevH1 = hum1;
-    prevT2 = temp2;
-    prevH2 = hum2;
-    
+
     Serial.println("[ClockPage] 完整绘制完成");
 }
 
@@ -324,23 +341,22 @@ void updateClockPage() {
     float hum2  = dht2.getHumidity();
     
     static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
-    if (!dht1.isValid()) {
-        temp1 = prevT1;
-        hum1  = prevH1;
-    }
-    if (!dht2.isValid()) {
-        temp2 = prevT2;
-        hum2  = prevH2;
-    }
-    
-    prevT1 = temp1;
-    prevH1 = hum1;
-    prevT2 = temp2;
-    prevH2 = hum2;
-    
+    bool t1Ok = dht1.isValid() && temp1 >= -20 && temp1 <= 60;
+    bool h1Ok = dht1.isValid() && hum1  > 0 && hum1  <= 100;
+    bool t2Ok = dht2.isValid() && temp2 >= -20 && temp2 <= 60;
+    bool h2Ok = dht2.isValid() && hum2  > 0 && hum2  <= 100;
+    if (!t1Ok && prevT1 != -999) temp1 = prevT1;
+    if (!h1Ok && prevH1 != -999) hum1  = prevH1;
+    if (!t2Ok && prevT2 != -999) temp2 = prevT2;
+    if (!h2Ok && prevH2 != -999) hum2  = prevH2;
+    if (t1Ok) prevT1 = temp1;
+    if (h1Ok) prevH1 = hum1;
+    if (t2Ok) prevT2 = temp2;
+    if (h2Ok) prevH2 = hum2;
+
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();
-    
+
     drawStatusBar(wifiConnected, rssi, timeSynced, false);
     drawTime(h, m, s, false);
     drawDate(year, month, day, wday, false);

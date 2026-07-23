@@ -29,8 +29,8 @@ public:
     bool isConnected();
 
     int getRSSI();
-    const char* getLocalIP();
-    const char* getSSID();
+    String getLocalIP();
+    String getSSID();
     String getMacAddress();
 
     void startAPMode();
@@ -69,10 +69,16 @@ private:
     int _reconnectCount;
     int _txPower;
 
+    // ============ 扫描缓存 ============
+    String _scanCache;            // 上次扫描的 JSON 结果
+    unsigned long _scanCacheTime; // 缓存时间
+    int _lastScanStatus;          // -2=未开始, -1=扫描中, >=0=结果数
+
     static const unsigned long AP_TIMEOUT_MS = 10 * 60 * 1000;
     static const unsigned long SMART_CONFIG_TIMEOUT_MS = 120 * 1000;
     static const unsigned long RECONNECT_INTERVAL = 30000;
     static const int MAX_RECONNECT_ATTEMPTS = 5;
+    static const unsigned long SCAN_CACHE_MS = 15000;  // 扫描结果缓存 15s
 
     bool connectToWiFi(const String& ssid, const String& password);
     void applyTxPower();
@@ -83,6 +89,8 @@ private:
     void handleScan();
     void handleNotFound();
     String getHTML();
+    void performScan();           // 实际执行扫描（带缓存）
+    void buildScanJson(String& json);
 };
 
 #endif

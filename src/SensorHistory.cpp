@@ -63,6 +63,8 @@ void SensorHistory::getFilenameForDay(char* buffer, size_t size, int dayOffset) 
 }
 
 void SensorHistory::cleanOldFiles() {
+    // 从 MAX_HISTORY_DAYS 天前向后逐个检查，超过保留天数的文件全部删除
+    // 不使用 break：文件可能因为断电等原因被部分删除
     for (int i = MAX_HISTORY_DAYS; i <= 365; i++) {
         char oldFilename[32];
         getFilenameForDay(oldFilename, sizeof(oldFilename), -i);
@@ -73,8 +75,6 @@ void SensorHistory::cleanOldFiles() {
             } else {
                 Serial.printf("[SensorHistory] 删除失败: %s\n", oldFilename);
             }
-        } else {
-            break;
         }
     }
 }
@@ -222,6 +222,10 @@ bool SensorHistory::loadFromFile(const char* filename) {
         file.close();
         return false;
     }
+    
+    // 先清空再加载，避免与已有数据叠加
+    _head = 0;
+    _count = 0;
     
     // 读取每条数据
     int loadedCount = 0;

@@ -109,7 +109,10 @@ WiFiManager::WiFiManager()
       _apStartTime(0),
       _smartConfigStartTime(0),
       _lastReconnectAttempt(0), _reconnectCount(0),
-      _txPower(27) {}
+      _txPower(27),
+      _scanCache("[]"),
+      _scanCacheTime(0),
+      _lastScanStatus(-2) {}
 
 WiFiManager::~WiFiManager() {
     stopSmartConfig();
@@ -225,7 +228,10 @@ void WiFiManager::setTxPower(int percentage) {
 }
 
 void WiFiManager::applyTxPower() {
-    int power = 8 + (int)((106 - 8) * (_txPower / 100.0) + 0.5);
+    // ESP32-C3 TX power 范围：8-78（单位 0.25dBm，8=2dBm, 78=19.5dBm）
+    int power = 8 + (int)((78 - 8) * (_txPower / 100.0) + 0.5);
+    if (power < 8) power = 8;
+    if (power > 78) power = 78;
     esp_wifi_set_max_tx_power(power);
 }
 
@@ -349,7 +355,10 @@ void WiFiManager::startAPMode() {
     String apSSID = "ESP32-" + mac.substring(6, 12);
 
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(apSSID.c_str(), "12345678");
+    if (!WiFi.softAP(apSSID.c_str(), "12345678")) {
+        Serial.println("[WiFi] AP 启动失败！");
+        return;
+    }
 
     _apMode = true;
     _apStartTime = millis();
@@ -389,6 +398,8 @@ void WiFiManager::stopAPMode() {
     }
 
     WiFi.softAPdisconnect(true);
+    // 切回 STA 模式，便于后续重新连接
+    WiFi.mode(WIFI_STA);
     Serial.println("[WiFi] AP 模式已停止");
 }
 
@@ -452,13 +463,19 @@ void WiFiManager::handleSave() {
     }
 }
 
-void WiFiManager::handleScan() {
-    String json = "[";
+void WiFiManager::buildScanJson(String& json) {
     int n = WiFi.scanComplete();
+    
     if (n == -2) {
-        WiFi.scanNetworks(true);
+        // 扫描未启动
         json = "[]";
+    } else if (n == -1) {
+        // 扫描进行中 - 返回当前已有的扫描结果（如果有）
+        // 这里复用上次缓存，避免一直返回空
+        json = _scanCache;
     } else if (n >= 0) {
+        // 扫描完成，构建 JSON
+        json = "[";
         for (int i = 0; i < n; ++i) {
             if (i) json += ",";
             json += "{";
@@ -469,9 +486,36 @@ void WiFiManager::handleScan() {
             json += "\"encryption\":" + String(WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
             json += "}";
         }
+        json += "]";
         WiFi.scanDelete();
+        _lastScanStatus = n;
+        _scanCache = json;
+        _scanCacheTime = millis();
+    } else {
+        // 未知错误，返回缓存
+        json = _scanCache;
     }
-    json += "]";
+}
+
+void WiFiManager::performScan() {
+    unsigned long now = millis();
+    
+    // 如果缓存未过期，直接复用
+    if (_lastScanStatus >= 0 && (now - _scanCacheTime) < SCAN_CACHE_MS) {
+        return;
+    }
+    
+    // 启动新的异步扫描（如果当前没有进行中的扫描）
+    if (WiFi.scanComplete() == -2 || WiFi.scanComplete() == -1) {
+        WiFi.scanNetworks(true);
+        _lastScanStatus = -1;
+    }
+}
+
+void WiFiManager::handleScan() {
+    performScan();
+    String json;
+    buildScanJson(json);
     _server->send(200, "application/json", json);
 }
 
@@ -491,28 +535,24 @@ int WiFiManager::getRSSI() {
     return WiFi.RSSI();
 }
 
-const char* WiFiManager::getLocalIP() {
-    static String ipStr;
+String WiFiManager::getLocalIP() {
     if (isConnected()) {
-        ipStr = WiFi.localIP().toString();
-    } else if (_apMode) {
-        ipStr = WiFi.softAPIP().toString();
-    } else {
-        ipStr = "0.0.0.0";
+        return WiFi.localIP().toString();
     }
-    return ipStr.c_str();
+    if (_apMode) {
+        return WiFi.softAPIP().toString();
+    }
+    return "0.0.0.0";
 }
 
-const char* WiFiManager::getSSID() {
-    static String ssidStr;
+String WiFiManager::getSSID() {
     if (isConnected()) {
-        ssidStr = WiFi.SSID();
-    } else if (_apMode) {
-        ssidStr = "ESP32-AP";
-    } else {
-        ssidStr = "未连接";
+        return WiFi.SSID();
     }
-    return ssidStr.c_str();
+    if (_apMode) {
+        return "ESP32-AP";
+    }
+    return "未连接";
 }
 
 String WiFiManager::getMacAddress() {

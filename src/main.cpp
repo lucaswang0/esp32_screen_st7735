@@ -8,7 +8,7 @@
 #include "ClockPage.h"
 #include "FlipClockPage.h"
 #include "ChartPage.h"
-
+#include "SensorWebServer.h"
 #include "MqttManager.h"
 
 // MQTT 配置
@@ -50,7 +50,9 @@ WiFiManager wifiManager;
 SensorHistory sensorHistory1("sensor1");
 SensorHistory sensorHistory2("sensor2");
 MqttManager mqtt;
+SensorWebServer webServer;
 bool discoverySent = false;
+bool webServerStarted = false;
 
 struct tm timeinfo;
 bool timeSynced = false;
@@ -137,20 +139,23 @@ void readSensors(float& t1, float& h1, float& t2, float& h2) {
     h2 = dht2.getHumidity();
     
     static float lastT1 = -999, lastH1 = -999, lastT2 = -999, lastH2 = -999;
-    
-    if (!dht1.isValid() || t1 < -10 || t1 > 60 || h1 < 0 || h1 > 100) {
-        if (lastT1 != -999) t1 = lastT1;
-        if (lastH1 != -999) h1 = lastH1;
-    }
-    if (!dht2.isValid() || t2 < -10 || t2 > 60 || h2 < 0 || h2 > 100) {
-        if (lastT2 != -999) t2 = lastT2;
-        if (lastH2 != -999) h2 = lastH2;
-    }
-    
-    lastT1 = t1;
-    lastH1 = h1;
-    lastT2 = t2;
-    lastH2 = h2;
+
+    // 有效性检查：DHT11 温度范围 -20~60°C，湿度 1-100%RH（0 视为通信异常）
+    bool t1Ok = dht1.isValid() && t1 >= -20 && t1 <= 60;
+    bool h1Ok = dht1.isValid() && h1 > 0 && h1 <= 100;
+    bool t2Ok = dht2.isValid() && t2 >= -20 && t2 <= 60;
+    bool h2Ok = dht2.isValid() && h2 > 0 && h2 <= 100;
+
+    if (!t1Ok && lastT1 != -999) t1 = lastT1;
+    if (!h1Ok && lastH1 != -999) h1 = lastH1;
+    if (!t2Ok && lastT2 != -999) t2 = lastT2;
+    if (!h2Ok && lastH2 != -999) h2 = lastH2;
+
+    // 只用有效值更新 last，避免坏值污染历史缓存
+    if (t1Ok) lastT1 = t1;
+    if (h1Ok) lastH1 = h1;
+    if (t2Ok) lastT2 = t2;
+    if (h2Ok) lastH2 = h2;
 }
 
 // ============================================================================
@@ -241,40 +246,50 @@ void publishSensorData() {
     static float lastT1 = -999, lastH1 = -999;
     static float lastT2 = -999, lastH2 = -999;
     static unsigned long lastForcePublish = 0;
-    
+
     dht1.update();
     dht2.update();
-    
+
     float t1 = dht1.getTemperature();
     float h1 = dht1.getHumidity();
     float t2 = dht2.getTemperature();
     float h2 = dht2.getHumidity();
-    
+
+    // 有效性检查：温度 -20~60°C，湿度 1-100%RH
+    bool t1Ok = dht1.isValid() && t1 >= -20 && t1 <= 60;
+    bool h1Ok = dht1.isValid() && h1 > 0 && h1 <= 100;
+    bool t2Ok = dht2.isValid() && t2 >= -20 && t2 <= 60;
+    bool h2Ok = dht2.isValid() && h2 > 0 && h2 <= 100;
+    if (!t1Ok && lastT1 != -999) t1 = lastT1;
+    if (!h1Ok && lastH1 != -999) h1 = lastH1;
+    if (!t2Ok && lastT2 != -999) t2 = lastT2;
+    if (!h2Ok && lastH2 != -999) h2 = lastH2;
+
     unsigned long now = millis();
     bool forcePublish = (now - lastForcePublish >= MQTT_FORCE_PUBLISH_INTERVAL);
-    
+
     if (forcePublish) {
         lastForcePublish = now;
     }
-    
+
     // 数据变化时发布，或强制发布间隔到达时发布
     if (forcePublish || t1 != lastT1) {
         mqtt.publish("esp32/sensor/temp1", t1);
-        lastT1 = t1;
+        if (t1Ok) lastT1 = t1;
     }
     if (forcePublish || h1 != lastH1) {
         mqtt.publish("esp32/sensor/hum1", h1);
-        lastH1 = h1;
+        if (h1Ok) lastH1 = h1;
     }
     if (forcePublish || t2 != lastT2) {
         mqtt.publish("esp32/sensor/temp2", t2);
-        lastT2 = t2;
+        if (t2Ok) lastT2 = t2;
     }
     if (forcePublish || h2 != lastH2) {
         mqtt.publish("esp32/sensor/hum2", h2);
-        lastH2 = h2;
+        if (h2Ok) lastH2 = h2;
     }
-    
+
     if (forcePublish) {
         Serial.println("[MQTT] 定时强制发布传感器数据");
     }
@@ -321,7 +336,12 @@ void setup() {
         // 初始化 MQTT（非阻塞，只设置服务器）
         mqtt.begin(MQTT_SERVER, MQTT_PORT);
         discoverySent = false;
-            
+
+        // 启动常驻 Web 服务（展示传感器历史）
+        webServer.begin();
+        webServer.start();
+        webServerStarted = true;
+
 } else {
         Serial.println("[WiFi] 进入 AP 配网模式");
         Serial.println("  热点: ESP32-Weather");
@@ -377,14 +397,28 @@ void loop() {
 
     // ---- MQTT 状态机（非阻塞） ----
     mqtt.loop();
-    
+
     // ---- 检测刚连接成功，发送发现消息 ----
     if (mqtt.isJustConnected() && !discoverySent) {
         Serial.println("[MQTT] 连接成功，发送发现消息...");
         sendDiscoveryMessages();
         discoverySent = true;
     }
-    
+
+    // ---- Web 服务（WiFi 连接时运行） ----
+    if (wifiManager.isConnected()) {
+        if (!webServerStarted) {
+            // WiFi 重连后重新启动 web server
+            webServer.start();
+            webServerStarted = true;
+            Serial.println("[WebServer] WiFi 重连，HTTP 服务已恢复");
+        }
+        webServer.handleClient();
+    } else if (webServerStarted) {
+        webServer.stop();
+        webServerStarted = false;
+    }
+
     // ---- LED指示灯控制 ----
     if (wifiManager.isConnected()) {
         digitalWrite(LED_PIN, LOW);
@@ -399,7 +433,7 @@ void loop() {
     // ---- 1. 页面切换 (每10秒) ----
     if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
         lastPageSwitch = now;
-        currentPage = (currentPage + 1) % 1;
+        currentPage = (currentPage + 1) % 2;
         forcePageRedraw = true;
         drawBg();
         if (currentPage == 0) {

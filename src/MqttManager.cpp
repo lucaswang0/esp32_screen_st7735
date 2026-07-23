@@ -73,7 +73,11 @@ void MqttManager::loop() {
             break;
 
         case MQTT_STATE_CONNECTED:
-            // 正常连接状态，无需处理
+            // 客户端内部断开但回调未触发时，主动检测
+            if (!_client.connected()) {
+                Serial.println("[MQTT] 检测到客户端已断开（回调未触发）");
+                scheduleNextRetry();
+            }
             break;
 
         case MQTT_STATE_SLEEPING:
@@ -91,11 +95,12 @@ void MqttManager::loop() {
 void MqttManager::transitionTo(MqttConnState newState) {
     if (_state == newState) return;
     
+    MqttConnState oldState = _state;
     _state = newState;
     _stateEnterTime = millis();
     
     const char* stateNames[] = {"IDLE", "WAITING", "CONNECTING", "CONNECTED", "SLEEPING"};
-    Serial.printf("[MQTT] 状态切换: %s -> %s\n", "...", stateNames[newState]); // 这里简化处理
+    Serial.printf("[MQTT] 状态切换: %s -> %s\n", stateNames[oldState], stateNames[newState]);
 }
 
 void MqttManager::tryConnect() {
@@ -106,7 +111,7 @@ void MqttManager::tryConnect() {
 
 void MqttManager::scheduleNextRetry() {
     _retryCount++;
-    if (_retryCount > MAX_RETRY_COUNT) {
+    if (_retryCount >= MAX_RETRY_COUNT) {
         enterSleep();
     } else {
         unsigned long backoff = getCurrentBackoff();
@@ -117,8 +122,11 @@ void MqttManager::scheduleNextRetry() {
 }
 
 unsigned long MqttManager::getCurrentBackoff() const {
-    // 指数退避: INITIAL * 2^(retry-1)
-    unsigned long backoff = INITIAL_BACKOFF_MS * (1UL << (_retryCount - 1));
+    // 指数退避: INITIAL * 2^(retry-1)，限制最大移位数避免 UB
+    int shift = _retryCount - 1;
+    if (shift < 0) shift = 0;
+    if (shift > 20) shift = 20;  // 防止 UB：1UL << 31 在 32 位 unsigned long 上是 UB
+    unsigned long backoff = INITIAL_BACKOFF_MS * (1UL << shift);
     return (backoff > MAX_BACKOFF_MS) ? MAX_BACKOFF_MS : backoff;
 }
 
@@ -151,8 +159,9 @@ void MqttManager::onDisconnect(AsyncMqttClientDisconnectReason reason) {
     Serial.printf("[MQTT] 断开连接, 原因: %d\n", (int)reason);
     _justConnected = false;
     
-    // 如果不是主动断开，则进入重试流程
-    if (_state == MQTT_STATE_CONNECTED) {
+    // 主动断开（外部调用 disconnect）不重试
+    // CONNECT_TIMEOUT_MS 内由 loop() 处理的超时也不需要这里处理
+    if (_state == MQTT_STATE_CONNECTED || _state == MQTT_STATE_CONNECTING) {
         scheduleNextRetry();
     }
 }
@@ -222,8 +231,17 @@ void MqttManager::sendDiscovery(const char* name, const char* deviceClass,
 }
 
 unsigned long MqttManager::getNextRetryIn() const {
+    unsigned long now = millis();
     if (_state == MQTT_STATE_WAITING) {
-        return (_nextRetryAt > millis()) ? (_nextRetryAt - millis()) : 0;
+        return (_nextRetryAt > now) ? (_nextRetryAt - now) : 0;
+    }
+    if (_state == MQTT_STATE_SLEEPING) {
+        unsigned long elapsed = now - _stateEnterTime;
+        return (elapsed < SLEEP_WAKEUP_MS) ? (SLEEP_WAKEUP_MS - elapsed) : 0;
+    }
+    if (_state == MQTT_STATE_CONNECTING) {
+        unsigned long elapsed = now - _stateEnterTime;
+        return (elapsed < CONNECT_TIMEOUT_MS) ? (CONNECT_TIMEOUT_MS - elapsed) : 0;
     }
     return 0;
 }
