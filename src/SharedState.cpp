@@ -6,8 +6,6 @@
 SemaphoreHandle_t xSensorMutex    = NULL;
 SemaphoreHandle_t xTimeMutex      = NULL;
 SemaphoreHandle_t xHistoryMutex   = NULL;
-SemaphoreHandle_t xMqttEventMutex = NULL;
-SemaphoreHandle_t xDisplayMutex   = NULL;
 
 // ============================================================================
 // 全局共享数据
@@ -28,11 +26,8 @@ void initSharedState() {
     xSensorMutex    = xSemaphoreCreateMutex();
     xTimeMutex      = xSemaphoreCreateMutex();
     xHistoryMutex   = xSemaphoreCreateMutex();
-    xMqttEventMutex = xSemaphoreCreateMutex();
-    xDisplayMutex   = xSemaphoreCreateMutex();
 
-    if (!xSensorMutex || !xTimeMutex || !xHistoryMutex ||
-        !xMqttEventMutex || !xDisplayMutex) {
+    if (!xSensorMutex || !xTimeMutex || !xHistoryMutex) {
         Serial.println("[SharedState] 互斥锁创建失败！");
         while (1) { delay(1000); }
     }

@@ -9,7 +9,6 @@ extern DHT11Sensor dht1;
 extern DHT11Sensor dht2;
 extern SensorHistory sensorHistory1;
 extern SensorHistory sensorHistory2;
-extern bool forcePageRedraw;
 
 // ========== 颜色定义 ==========
 #define ACCENT_COLOR   tft.color565(100, 200, 255)
@@ -397,8 +396,6 @@ void initChartPage() {
 // ============================================================================
 void updateChartPage() {
     if (!chartInitialized) {
-        initChartPage();
-        forcePageRedraw = true;
         return;
     }
     

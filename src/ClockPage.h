@@ -10,6 +10,4 @@ void drawClockPage();
 
 void updateClockPage();
 
-void renderFlipClock();
-
 #endif

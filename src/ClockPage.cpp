@@ -14,7 +14,6 @@ extern bool timeSynced;
 #define ENABLE_DEBUG false
 
 #define BG_COLOR       tft.color565(8, 8, 20)
-#define CARD_BG        tft.color565(12, 12, 32)
 #define ACCENT_COLOR   tft.color565(100, 200, 255)
 #define DIM_TEXT       tft.color565(180, 180, 200)
 #define WHITE          tft.color565(255, 255, 255)
@@ -47,8 +46,6 @@ const int BOTTOM_H      = 128 - BOTTOM_Y;
 const int LABEL_X       = 0;
 
 const char* WEEK_DAYS[] = {"日", "一", "二", "三", "四", "五", "六"};
-
-static bool initialized = false;
 
 static bool lastWifi = false;
 static int lastRssi = 999;
@@ -265,7 +262,6 @@ void initClockPage() {
         lastValues[i] = -999;
     }
     lastSeconds = -1;
-    initialized = true;
     
     initFlipClockWidget(0, TIME_Y, 128, TIME_H);
     
@@ -346,7 +342,4 @@ void updateClockPage() {
     drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, false);
     drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, false);
     drawBottomStatus(millis(), false);
-}
-
-void renderFlipClock() {
 }

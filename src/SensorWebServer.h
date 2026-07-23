@@ -39,11 +39,12 @@ private:
     void handleRoot();
     void handleApiData();
     void handleApiHistory();
+    void handleApiDates();
     void handleNotFound();
 
     // 工具：构造 JSON
     String buildCurrentJson() const;
-    String buildHistoryJson(SensorHistory& history, const char* type) const;
+    String buildHistoryJson(SensorHistory& history, const char* type, const char* date) const;
 };
 
 #endif

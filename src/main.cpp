@@ -45,10 +45,9 @@ MqttManager mqtt;
 SensorWebServer webServer;
 
 // ============================================================================
-// 跨文件全局（ClockPage/ChartPage 仍引用）
+// 跨文件全局（ClockPage 仍引用）
 // ============================================================================
 bool timeSynced = false;         // 同步到 g_timeInfo.synced（保留向后兼容）
-bool forcePageRedraw = false;    // ChartPage 引用
 
 // ============================================================================
 // Setup
@@ -102,7 +101,6 @@ void setup() {
 
     // 9. 页面初始化
     initClockPage();
-    initFlipClockPage();
     initChartPage();
 
     // 10. 首次绘制

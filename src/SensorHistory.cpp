@@ -110,54 +110,6 @@ void SensorHistory::checkMidnightReset(uint8_t currentHour, uint8_t currentMinut
     checkDayChange(currentHour, currentMinute);
 }
 
-float SensorHistory::getMinTemp() const {
-    if (_count == 0) return 0.0f;
-    float min = 999.0f;
-    for (int i = 0; i < _count; i++) {
-        const SensorSample& s = getSample(i);
-        if (s.temp < min) {
-            min = s.temp;
-        }
-    }
-    return min;
-}
-
-float SensorHistory::getMaxTemp() const {
-    if (_count == 0) return 0.0f;
-    float max = -999.0f;
-    for (int i = 0; i < _count; i++) {
-        const SensorSample& s = getSample(i);
-        if (s.temp > max) {
-            max = s.temp;
-        }
-    }
-    return max;
-}
-
-float SensorHistory::getMinHumidity() const {
-    if (_count == 0) return 0.0f;
-    float min = 999.0f;
-    for (int i = 0; i < _count; i++) {
-        const SensorSample& s = getSample(i);
-        if (s.humidity < min) {
-            min = s.humidity;
-        }
-    }
-    return min;
-}
-
-float SensorHistory::getMaxHumidity() const {
-    if (_count == 0) return 0.0f;
-    float max = -999.0f;
-    for (int i = 0; i < _count; i++) {
-        const SensorSample& s = getSample(i);
-        if (s.humidity > max) {
-            max = s.humidity;
-        }
-    }
-    return max;
-}
-
 void SensorHistory::getCurrentFilename(char* buffer, size_t size) {
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
@@ -247,4 +199,43 @@ bool SensorHistory::loadFromFile(const char* filename) {
     
     Serial.printf("[SensorHistory] 从 %s 加载 %d 条记录\n", filename, loadedCount);
     return loadedCount > 0;
+}
+
+int SensorHistory::readByDate(const char* date, SensorSample* outBuffer, int maxSamples) {
+    char filename[32];
+
+    if (date && date[0]) {
+        // 用 date 字符串拼出完整文件名（不校验日期合法性）
+        snprintf(filename, sizeof(filename), "/%s_%s.dat", _filenamePrefix, date);
+    } else {
+        // 当天：用当前时间
+        getCurrentFilename(filename, sizeof(filename));
+    }
+
+    if (!SPIFFS.exists(filename)) {
+        return 0;
+    }
+
+    fs::File file = SPIFFS.open(filename, FILE_READ);
+    if (!file) {
+        return 0;
+    }
+
+    int fileCount = 0;
+    if (file.available() >= (int)sizeof(fileCount)) {
+        file.read((uint8_t*)&fileCount, sizeof(fileCount));
+    }
+    if (fileCount <= 0 || fileCount > MAX_SAMPLES) {
+        file.close();
+        return 0;
+    }
+
+    int loaded = 0;
+    for (int i = 0; i < fileCount && loaded < maxSamples; i++) {
+        SensorSample s;
+        if (file.read((uint8_t*)&s, sizeof(s)) != sizeof(s)) break;
+        outBuffer[loaded++] = s;
+    }
+    file.close();
+    return loaded;
 }

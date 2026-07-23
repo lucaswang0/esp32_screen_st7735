@@ -26,25 +26,10 @@ public:
     void publish(const char* topic, const char* payload);
     void publish(const char* topic, float value, int decimals = 1);
 
-    void setAutoDiscovery(bool enable);
-    void sendDiscovery(const char* name, const char* deviceClass,
-                       const char* unitOfMeasurement, const char* stateTopic);
-
-    // 手动唤醒休眠中的 MQTT（用户/外部事件干预）
-    void wakeup();
-
-    // 状态查询（用于调试或 UI 展示）
-    MqttConnState getState() const { return _state; }
-    int getRetryCount() const { return _retryCount; }
-    unsigned long getNextRetryIn() const;
-
 private:
     AsyncMqttClient _client;
     const char* _server = nullptr;
     int _port = 1883;
-    bool _autoDiscovery = false;
-    String _baseTopic = "homeassistant";
-    String _deviceId = "esp32_sensor";
     bool _justConnected = false;
 
     // ============ 重试状态机 ============

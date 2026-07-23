@@ -142,15 +142,6 @@ void MqttManager::resetRetry() {
     _retryCount = 0;
 }
 
-void MqttManager::wakeup() {
-    if (_state == MQTT_STATE_SLEEPING) {
-        Serial.println("[MQTT] 收到手动唤醒指令");
-        resetRetry();
-        transitionTo(MQTT_STATE_CONNECTING);
-        tryConnect();
-    }
-}
-
 void MqttManager::onConnect(bool sessionPresent) {
     // 临界区保护 _justConnected（与 isJustConnected 的 check-and-clear 互斥）
     portENTER_CRITICAL(&s_justConnectedMux);
@@ -204,54 +195,4 @@ void MqttManager::publish(const char* topic, float value, int decimals) {
     char buf[16];
     dtostrf(value, 1, decimals, buf);
     publish(topic, buf);
-}
-
-void MqttManager::setAutoDiscovery(bool enable) {
-    _autoDiscovery = enable;
-}
-
-void MqttManager::sendDiscovery(const char* name, const char* deviceClass,
-                                 const char* unitOfMeasurement, const char* stateTopic) {
-    if (!isConnected()) {
-        Serial.println("[MQTT] 未连接，无法发送发现消息");
-        return;
-    }
-    
-    String configTopic = _baseTopic + "/sensor/" + String(stateTopic) + "/config";
-    String payload = "{";
-    payload += "\"name\":\"" + String(name) + "\",";
-    payload += "\"state_topic\":\"" + String(stateTopic) + "\",";
-    payload += "\"unit_of_measurement\":\"" + String(unitOfMeasurement) + "\",";
-    payload += "\"device_class\":\"" + String(deviceClass) + "\",";
-    payload += "\"unique_id\":\"" + String(stateTopic) + "\",";
-    payload += "\"device\":{";
-    payload += "\"identifiers\":[\"" + _deviceId + "\"],";
-    payload += "\"name\":\"ESP32 传感器\",";
-    payload += "\"model\":\"ESP32-C3\",";
-    payload += "\"manufacturer\":\"Espressif\"";
-    payload += "}";
-    payload += "}";
-    
-    uint16_t packetId = _client.publish(configTopic.c_str(), 1, true, payload.c_str());
-    if (packetId) {
-        Serial.printf("[MQTT] 发现配置已发送: %s\n", configTopic.c_str());
-    } else {
-        Serial.printf("[MQTT] 发现配置发送失败: %s\n", configTopic.c_str());
-    }
-}
-
-unsigned long MqttManager::getNextRetryIn() const {
-    unsigned long now = millis();
-    if (_state == MQTT_STATE_WAITING) {
-        return (_nextRetryAt > now) ? (_nextRetryAt - now) : 0;
-    }
-    if (_state == MQTT_STATE_SLEEPING) {
-        unsigned long elapsed = now - _stateEnterTime;
-        return (elapsed < SLEEP_WAKEUP_MS) ? (SLEEP_WAKEUP_MS - elapsed) : 0;
-    }
-    if (_state == MQTT_STATE_CONNECTING) {
-        unsigned long elapsed = now - _stateEnterTime;
-        return (elapsed < CONNECT_TIMEOUT_MS) ? (CONNECT_TIMEOUT_MS - elapsed) : 0;
-    }
-    return 0;
 }

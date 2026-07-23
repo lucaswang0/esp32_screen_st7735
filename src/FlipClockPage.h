@@ -16,9 +16,7 @@
 #define FLIP_N_STRIPS     14
 
 #define FLIP_BG_COLOR     0x18C3
-#define FLIP_CARD_BG      0x18C3
 #define FLIP_COLON_CLR    0x8C51
-#define FLIP_TEXT_CLR     0xCE79
 
 #define FLIP_N_DIGITS     6
 #define FLIP_N_COLONS     2
@@ -34,11 +32,6 @@ struct FlipEntry {
 };
 
 extern FlipEntry flip_table[FLIP_ANIM_HALF];
-
-void initFlipClockPage();
-void drawFlipClockPage();
-void updateFlipClockPage();
-void renderFlipClockAnimation();
 
 void initFlipClockWidget(int x, int y, int w, int h);
 void drawFlipClockWidget(int h, int m, int s);

@@ -24,8 +24,6 @@ extern SensorWebServer webServer;
 extern bool timeSynced;  // UI 状态显示用（main.cpp 全局）
 
 // 配置常量（从 main.cpp 移过来）
-#define MQTT_SERVER   "10.45.1.3"
-#define MQTT_PORT     1883
 #define TIMEZONE_OFFSET 8
 #define NTP_SERVER1   "ntp1.aliyun.com"
 #define NTP_SERVER2   "ntp2.aliyun.com"

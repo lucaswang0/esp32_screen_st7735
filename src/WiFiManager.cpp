@@ -105,7 +105,6 @@ WiFiManager::WiFiManager()
       _credentialCount(0),
       _apMode(false),
       _smartConfigStarted(false),
-      _smartConfigDone(false),
       _apStartTime(0),
       _smartConfigStartTime(0),
       _lastReconnectAttempt(0), _reconnectCount(0),
@@ -210,16 +209,6 @@ bool WiFiManager::loadCredentials() {
 
 bool WiFiManager::hasSavedCredentials() {
     return _credentialCount > 0;
-}
-
-int WiFiManager::getCredentialCount() {
-    return _credentialCount;
-}
-
-void WiFiManager::resetConfig() {
-    _preferences.clear();
-    _credentialCount = 0;
-    Serial.println("[WiFi] 配置已清除");
 }
 
 void WiFiManager::setTxPower(int percentage) {
@@ -403,10 +392,6 @@ void WiFiManager::stopAPMode() {
     Serial.println("[WiFi] AP 模式已停止");
 }
 
-bool WiFiManager::isAPMode() {
-    return _apMode;
-}
-
 bool WiFiManager::isAPStarted() {
     return _apMode;
 }
@@ -555,10 +540,6 @@ String WiFiManager::getSSID() {
     return "未连接";
 }
 
-String WiFiManager::getMacAddress() {
-    return WiFi.macAddress();
-}
-
 void WiFiManager::startSmartConfig() {
     if (_smartConfigStarted) return;
 
@@ -566,7 +547,6 @@ void WiFiManager::startSmartConfig() {
 
     WiFi.beginSmartConfig();
     _smartConfigStarted = true;
-    _smartConfigDone = false;
     _smartConfigStartTime = millis();
 
     Serial.println("[SmartConfig] 等待 ESP-Touch 广播...");
@@ -579,14 +559,9 @@ void WiFiManager::stopSmartConfig() {
 
     WiFi.stopSmartConfig();
     _smartConfigStarted = false;
-    _smartConfigDone = false;
     _smartConfigStartTime = 0;
 
     Serial.println("[SmartConfig] 已停止");
-}
-
-bool WiFiManager::isSmartConfigStarted() {
-    return _smartConfigStarted;
 }
 
 void WiFiManager::handleSmartConfig() {
@@ -594,7 +569,6 @@ void WiFiManager::handleSmartConfig() {
 
     if (WiFi.smartConfigDone()) {
         Serial.println("[SmartConfig] 收到 ESP-Touch 配置！");
-        _smartConfigDone = true;
 
         String ssid = WiFi.SSID();
         String password = WiFi.psk();

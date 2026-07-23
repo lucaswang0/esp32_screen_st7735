@@ -23,16 +23,15 @@ public:
     void reset();
     void checkMidnightReset(uint8_t currentHour, uint8_t currentMinute);
     void checkDayChange(uint8_t currentHour, uint8_t currentMinute);
-    
-    float getMinTemp() const;
-    float getMaxTemp() const;
-    float getMinHumidity() const;
-    float getMaxHumidity() const;
-    
+
     void saveToFile();
     bool loadFromFile();
     void saveToFile(const char* filename);
     bool loadFromFile(const char* filename);
+
+    // 只读读取指定日期文件（不修改内部状态，可在 API 中并发调用）
+    // date 格式 "YYYY-MM-DD"；传 NULL 或空字符串表示今天
+    int readByDate(const char* date, SensorSample* outBuffer, int maxSamples);
     
 private:
     SensorSample _samples[MAX_SAMPLES];

@@ -31,25 +31,19 @@ public:
     int getRSSI();
     String getLocalIP();
     String getSSID();
-    String getMacAddress();
 
     void startAPMode();
     void stopAPMode();
-    bool isAPMode();
     bool isAPStarted();
     void handleClient();
     void checkAPTimeout();
 
     void startSmartConfig();
     void stopSmartConfig();
-    bool isSmartConfigStarted();
     void handleSmartConfig();
 
     void saveCredentials(const String& ssid, const String& password);
     bool hasSavedCredentials();
-    int getCredentialCount();
-    void resetConfig();
-
     void setTxPower(int percentage);
 
 private:
@@ -62,7 +56,6 @@ private:
 
     bool _apMode;
     bool _smartConfigStarted;
-    bool _smartConfigDone;
     unsigned long _apStartTime;
     unsigned long _smartConfigStartTime;
     unsigned long _lastReconnectAttempt;

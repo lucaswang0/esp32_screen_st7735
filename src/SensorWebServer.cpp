@@ -1,5 +1,6 @@
 #include "SensorWebServer.h"
 #include <WebServer.h>
+#include <FS.h>
 #include "DHT11Sensor.h"
 #include "WiFiManager.h"
 #include "SharedState.h"
@@ -39,7 +40,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
             background: #16213e; padding: 20px; border-radius: 10px; margin-bottom: 20px;
         }
         .card h2 { color: #00d2ff; margin-top: 0; }
-        .chart-container { position: relative; height: 300px; }
+        .chart-container { position: relative; height: 280px; }
+        .date-picker { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+        .date-picker label { color: #aaa; font-size: 14px; }
+        .date-picker select {
+            background: #1a2540; color: #fff; border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px; padding: 6px 12px; font-size: 14px; cursor: pointer;
+        }
+        .date-hint { color: #4dabf7; font-size: 13px; }
+        .card h3 { color: #00d2ff; margin-top: 20px; margin-bottom: 10px; }
         .current {
             display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 15px; margin-bottom: 20px;
@@ -104,14 +113,19 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </div>
 
         <div class="card">
-            <h2>🌡️ 温度历史 (24小时)</h2>
+            <h2>📊 历史数据</h2>
+            <div class="date-picker">
+                <label>查看日期：</label>
+                <select id="dateSelect"></select>
+                <span id="dateHint" class="date-hint"></span>
+            </div>
+
+            <h3>🌡️ 温度</h3>
             <div class="chart-container">
                 <canvas id="tempChart"></canvas>
             </div>
-        </div>
 
-        <div class="card">
-            <h2>💧 湿度历史 (24小时)</h2>
+            <h3>💧 湿度</h3>
             <div class="chart-container">
                 <canvas id="humChart"></canvas>
             </div>
@@ -121,18 +135,60 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <script>
+        // 当前选中的日期（YYYY-MM-DD），和每图缓存的 labels/timestamps
+        let currentDate = null;
+        const state = {
+            temp: { labels: [], timestamps: [] },
+            hum:  { labels: [], timestamps: [] }
+        };
+
         // 通用图表配置
         const commonOptions = {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
+            interaction: { mode: 'nearest', intersect: false },
             plugins: {
                 legend: { labels: { color: '#eee' } },
-                tooltip: { backgroundColor: 'rgba(0,0,0,0.8)' }
+                tooltip: {
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    callbacks: {
+                        title: function(items) {
+                            const item = items[0];
+                            const chart = item.chart;
+                            const target = chart.canvas.id === 'tempChart' ? 'temp' : 'hum';
+                            const ts = item.parsed.x;
+                            const idx = state[target].timestamps.indexOf(ts);
+                            return idx >= 0 ? state[target].labels[idx] : '';
+                        }
+                    }
+                }
             },
             scales: {
                 x: {
-                    ticks: { color: '#aaa', maxRotation: 0, autoSkipPadding: 20 },
+                    type: 'linear',
+                    min: 0,
+                    max: 1440,
+                    ticks: {
+                        color: '#aaa',
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 6,
+                        stepSize: 240,
+                        callback: function(value) {
+                            // 找到最近的时间戳对应的 label
+                            const chart = this.chart;
+                            const target = chart.canvas.id === 'tempChart' ? 'temp' : 'hum';
+                            const timestamps = state[target].timestamps;
+                            const labels = state[target].labels;
+                            const idx = timestamps.indexOf(value);
+                            if (idx >= 0) return labels[idx];
+                            // 兜底：按小时格式化
+                            const h = Math.floor(value / 60);
+                            const m = value % 60;
+                            if (m === 0) return String(h).padStart(2, '0') + ':00';
+                            return '';
+                        }
+                    },
                     grid: { color: 'rgba(255,255,255,0.05)' }
                 },
                 y: {
@@ -142,31 +198,27 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
             }
         };
 
+        function makeDataset(label, borderColor, bgColor) {
+            return {
+                label: label,
+                borderColor: borderColor,
+                backgroundColor: bgColor,
+                data: [],
+                parsing: false,
+                spanGaps: true,
+                tension: 0.3,
+                fill: true
+            };
+        }
+
         // 温度图表
         const tempCtx = document.getElementById('tempChart').getContext('2d');
         const tempChart = new Chart(tempCtx, {
             type: 'line',
-            data: {
-                labels: [],
-                datasets: [
-                    {
-                        label: '温度 1 (°C)',
-                        borderColor: '#4dabf7',
-                        backgroundColor: 'rgba(77,171,247,0.1)',
-                        data: [],
-                        tension: 0.3,
-                        fill: true
-                    },
-                    {
-                        label: '温度 2 (°C)',
-                        borderColor: '#ff9f43',
-                        backgroundColor: 'rgba(255,159,67,0.1)',
-                        data: [],
-                        tension: 0.3,
-                        fill: true
-                    }
-                ]
-            },
+            data: { datasets: [
+                makeDataset('温度 1 (°C)', '#4dabf7', 'rgba(77,171,247,0.1)'),
+                makeDataset('温度 2 (°C)', '#ff9f43', 'rgba(255,159,67,0.1)')
+            ] },
             options: { ...commonOptions, scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, suggestedMin: 0, suggestedMax: 50 } } }
         });
 
@@ -174,27 +226,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
         const humCtx = document.getElementById('humChart').getContext('2d');
         const humChart = new Chart(humCtx, {
             type: 'line',
-            data: {
-                labels: [],
-                datasets: [
-                    {
-                        label: '湿度 1 (%)',
-                        borderColor: '#00d2ff',
-                        backgroundColor: 'rgba(0,210,255,0.1)',
-                        data: [],
-                        tension: 0.3,
-                        fill: true
-                    },
-                    {
-                        label: '湿度 2 (%)',
-                        borderColor: '#51cf66',
-                        backgroundColor: 'rgba(81,207,102,0.1)',
-                        data: [],
-                        tension: 0.3,
-                        fill: true
-                    }
-                ]
-            },
+            data: { datasets: [
+                makeDataset('湿度 1 (%)', '#00d2ff', 'rgba(0,210,255,0.1)'),
+                makeDataset('湿度 2 (%)', '#51cf66', 'rgba(81,207,102,0.1)')
+            ] },
             options: { ...commonOptions, scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, suggestedMin: 0, suggestedMax: 100 } } }
         });
 
@@ -214,25 +249,126 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
             } catch (e) { console.error('fetch current', e); }
         }
 
-        async function fetchHistory(type, chart) {
+        function setChartData(chart, d, target) {
+            state[target].labels = d.labels || [];
+            state[target].timestamps = d.timestamps || [];
+
+            const toPoints = (arr) => {
+                const out = [];
+                for (let i = 0; i < arr.length; i++) {
+                    if (arr[i] === null || arr[i] === undefined) continue;
+                    out.push({ x: state[target].timestamps[i], y: arr[i] });
+                }
+                return out;
+            };
+            chart.data.datasets[0].data = toPoints(d.data1);
+            chart.data.datasets[1].data = toPoints(d.data2);
+            chart.update('none');
+        }
+
+        async function fetchHistory(target, chart) {
+            if (!currentDate) return;
             try {
-                const r = await fetch('/api/history?type=' + type);
+                const r = await fetch('/api/history?type=' + target + '&date=' + currentDate);
                 const d = await r.json();
-                chart.data.labels = d.labels;
-                chart.data.datasets[0].data = d.data1;
-                chart.data.datasets[1].data = d.data2;
-                chart.update('none');
+                if (d.error) { console.error('history error', d.error); return; }
+                setChartData(chart, d, target);
             } catch (e) { console.error('fetch history', e); }
         }
 
-        // 初次加载 + 定时刷新
-        fetchData();
-        fetchHistory('temp', tempChart);
-        fetchHistory('hum', humChart);
+        // 加载日期列表 + 初始化选择器
+        async function loadDates() {
+            try {
+                const r = await fetch('/api/dates');
+                const d = await r.json();
+                const dates = d.dates || [];
+                const today = d.today;
 
-        setInterval(fetchData, 5000);          // 当前数据每 5s
-        setInterval(() => fetchHistory('temp', tempChart), 60000);  // 历史数据每 60s
-        setInterval(() => fetchHistory('hum', humChart), 60000);
+                const select = document.getElementById('dateSelect');
+                select.innerHTML = '';
+
+                if (dates.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.textContent = '暂无数据';
+                    opt.disabled = true;
+                    select.appendChild(opt);
+                    document.getElementById('dateHint').textContent = '请等待第一次采样';
+                    return;
+                }
+
+                // 倒序（最新在前）
+                dates.sort().reverse();
+                for (const date of dates) {
+                    const opt = document.createElement('option');
+                    opt.value = date;
+                    const md = date.slice(5);  // "07-22"
+                    if (date === today) {
+                        opt.textContent = '今天 (' + md + ')';
+                    } else {
+                        opt.textContent = md;
+                    }
+                    select.appendChild(opt);
+                }
+
+                // 默认选今天（如果今天没数据，选最近一天）
+                if (dates.includes(today)) {
+                    currentDate = today;
+                } else {
+                    currentDate = dates[0];
+                }
+                select.value = currentDate;
+
+                const hint = document.getElementById('dateHint');
+                if (currentDate === today) {
+                    hint.textContent = '显示今日数据';
+                } else {
+                    hint.textContent = '今天暂无数据，显示最近一天';
+                }
+            } catch (e) {
+                console.error('loadDates', e);
+            }
+        }
+
+        document.getElementById('dateSelect').addEventListener('change', (e) => {
+            currentDate = e.target.value;
+            document.getElementById('dateHint').textContent = '显示 ' + currentDate + ' 数据';
+            fetchHistory('temp', tempChart);
+            fetchHistory('hum', humChart);
+        });
+
+        // 初次加载
+        (async () => {
+            await loadDates();
+            fetchData();
+            if (currentDate) {
+                fetchHistory('temp', tempChart);
+                fetchHistory('hum', humChart);
+            }
+        })();
+
+        // 定时刷新（当前数据 5s，历史数据 60s）
+        setInterval(fetchData, 5000);
+        setInterval(() => {
+            if (currentDate) {
+                fetchHistory('temp', tempChart);
+                fetchHistory('hum', humChart);
+            }
+        }, 60000);
+
+        // 每分钟检查一次"今天"是否出现（跨天场景）
+        setInterval(async () => {
+            const r = await fetch('/api/dates');
+            const d = await r.json();
+            if (d.today && d.dates && d.dates.includes(d.today)) {
+                const select = document.getElementById('dateSelect');
+                if (![...select.options].some(o => o.value === d.today)) {
+                    const opt = document.createElement('option');
+                    opt.value = d.today;
+                    opt.textContent = '今天 (' + d.today.slice(5) + ')';
+                    select.insertBefore(opt, select.firstChild);
+                }
+            }
+        }, 60000);
     </script>
 </body>
 </html>
@@ -290,6 +426,7 @@ void SensorWebServer::setupRoutes() {
     _server->on("/", HTTP_GET, [this]() { this->handleRoot(); });
     _server->on("/api/current", HTTP_GET, [this]() { this->handleApiData(); });
     _server->on("/api/history", HTTP_GET, [this]() { this->handleApiHistory(); });
+    _server->on("/api/dates", HTTP_GET, [this]() { this->handleApiDates(); });
     _server->onNotFound([this]() { this->handleNotFound(); });
 }
 
@@ -350,62 +487,69 @@ void SensorWebServer::handleApiData() {
     _server->send(200, "application/json", buildCurrentJson());
 }
 
-String SensorWebServer::buildHistoryJson(SensorHistory& history, const char* type) const {
-    // 在 history mutex 下读取（TaskSample 写入时持有该锁）
+String SensorWebServer::buildHistoryJson(SensorHistory& history, const char* type, const char* date) const {
     if (xSemaphoreTake(xHistoryMutex, pdMS_TO_TICKS(200)) != pdTRUE) {
         return "{\"error\":\"busy\"}";
     }
 
-    int count = _history1->getCount();
-    int count2 = _history2->getCount();
-    int maxCount = count > count2 ? count : count2;
+    // 读取指定日期的两个传感器数据（不修改内部状态）
+    static SensorSample buf1[MAX_SAMPLES];
+    static SensorSample buf2[MAX_SAMPLES];
+    int n1 = _history1->readByDate(date, buf1, MAX_SAMPLES);
+    int n2 = _history2->readByDate(date, buf2, MAX_SAMPLES);
+    int maxN = n1 > n2 ? n1 : n2;
 
-    String labels = "[";
-    String data1 = "[";
-    String data2 = "[";
+    String labels, timestamps, data1, data2;
+    labels.reserve(maxN * 8);
+    timestamps.reserve(maxN * 6);
+    data1.reserve(maxN * 6);
+    data2.reserve(maxN * 6);
 
-    for (int i = 0; i < maxCount; i++) {
-        // 标签：使用 history1 的时间
-        if (i < count) {
-            const SensorSample& s = _history1->getSample(i);
-            char label[8];
-            snprintf(label, sizeof(label), "%02d:%02d", s.hour, s.minute);
-            if (i) labels += ",";
-            labels += "\"" + String(label) + "\"";
-        } else {
-            if (i) labels += ",";
-            labels += "\"\"";
+    labels = "[";
+    timestamps = "[";
+    data1 = "[";
+    data2 = "[";
+
+    for (int i = 0; i < maxN; i++) {
+        if (i) {
+            labels += ",";
+            timestamps += ",";
+            data1 += ",";
+            data2 += ",";
         }
+        // 优先用 buf1 的时间（两个传感器同时采样，时间一致）
+        const SensorSample* s;
+        if (i < n1) s = &buf1[i];
+        else        s = &buf2[i];
 
-        // data1: history1 的温度或湿度
-        if (i < count) {
-            const SensorSample& s1 = _history1->getSample(i);
-            float v = (strcmp(type, "temp") == 0) ? s1.temp : s1.humidity;
-            if (i) data1 += ",";
+        char labelBuf[8];
+        snprintf(labelBuf, sizeof(labelBuf), "\"%02d:%02d\"", s->hour, s->minute);
+        labels += labelBuf;
+        timestamps += String(s->hour * 60 + s->minute);
+
+        if (i < n1) {
+            float v = (strcmp(type, "temp") == 0) ? buf1[i].temp : buf1[i].humidity;
             data1 += String(v, 1);
         } else {
-            if (i) data1 += ",";
             data1 += "null";
         }
 
-        // data2: history2 的温度或湿度
-        if (i < count2) {
-            const SensorSample& s2 = _history2->getSample(i);
-            float v = (strcmp(type, "temp") == 0) ? s2.temp : s2.humidity;
-            if (i) data2 += ",";
+        if (i < n2) {
+            float v = (strcmp(type, "temp") == 0) ? buf2[i].temp : buf2[i].humidity;
             data2 += String(v, 1);
         } else {
-            if (i) data2 += ",";
             data2 += "null";
         }
     }
-
     labels += "]";
+    timestamps += "]";
     data1 += "]";
     data2 += "]";
 
     xSemaphoreGive(xHistoryMutex);
-    return "{\"labels\":" + labels + ",\"data1\":" + data1 + ",\"data2\":" + data2 + "}";
+    return "{\"date\":\"" + String(date ? date : "") + "\",\"labels\":" + labels +
+           ",\"timestamps\":" + timestamps +
+           ",\"data1\":" + data1 + ",\"data2\":" + data2 + "}";
 }
 
 void SensorWebServer::handleApiHistory() {
@@ -419,6 +563,57 @@ void SensorWebServer::handleApiHistory() {
         return;
     }
 
-    String json = buildHistoryJson(*_history1, type.c_str());
+    // date 参数：可选，缺省/空/"today" = 今天
+    const char* date = nullptr;
+    String dateArg;
+    if (_server->hasArg("date")) {
+        dateArg = _server->arg("date");
+        if (dateArg.length() > 0 && dateArg != "today") {
+            date = dateArg.c_str();
+        }
+    }
+
+    String json = buildHistoryJson(*_history1, type.c_str(), date);
+    _server->send(200, "application/json", json);
+}
+
+void SensorWebServer::handleApiDates() {
+    // 获取今天的日期（设备本地时间）
+    time_t now = time(NULL);
+    struct tm* tm = localtime(&now);
+    char today[16];
+    snprintf(today, sizeof(today), "%04d-%02d-%02d",
+             tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
+
+    // 扫描 SPIFFS 中以 "/sensor1_" 开头、".dat" 结尾的文件，提取日期
+    // （sensor1 与 sensor2 应同时存在，仅取一份即可）
+    String json = "{\"today\":\"";
+    json += today;
+    json += "\",\"dates\":[";
+    bool first = true;
+
+    fs::File root = SPIFFS.open("/");
+    if (root) {
+        fs::File file = root.openNextFile();
+        while (file) {
+            String name = file.name();
+            // SPIFFS 迭代时 file.name() 可能返回 "sensor1_2026-07-23.dat"
+            // 也可能返回 "/sensor1_2026-07-23.dat"，统一去掉前导 /
+            if (name.startsWith("/")) name = name.substring(1);
+            if (name.startsWith("sensor1_") && name.endsWith(".dat")) {
+                int dotIdx = name.lastIndexOf('.');
+                if (dotIdx > 8) {  // "sensor1_" 长度 = 8
+                    String date = name.substring(8, dotIdx);
+                    if (date.length() == 10) {  // YYYY-MM-DD
+                        if (!first) json += ",";
+                        json += "\"" + date + "\"";
+                        first = false;
+                    }
+                }
+            }
+            file = root.openNextFile();
+        }
+    }
+    json += "]}";
     _server->send(200, "application/json", json);
 }

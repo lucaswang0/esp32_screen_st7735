@@ -41,8 +41,6 @@ struct SensorSnapshot {
 extern SemaphoreHandle_t xSensorMutex;     // 保护 SharedSensorData
 extern SemaphoreHandle_t xTimeMutex;       // 保护 SharedTimeInfo
 extern SemaphoreHandle_t xHistoryMutex;    // 保护 SensorHistory1/2
-extern SemaphoreHandle_t xMqttEventMutex;  // 保护 MQTT just-connected 事件
-extern SemaphoreHandle_t xDisplayMutex;    // 保护 tft SPI 访问（备用，当前仅 UI 用）
 
 // ============================================================================
 // 全局共享数据
