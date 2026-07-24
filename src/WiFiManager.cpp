@@ -1,4 +1,5 @@
 #include "WiFiManager.h"
+#include "Log.h"
 
 static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -130,7 +131,7 @@ WiFiManager::~WiFiManager() {
 void WiFiManager::begin() {
     _preferences.begin("wifi", false);
     loadCredentials();
-    Serial.printf("[WiFi] 初始化完成，已保存 %d 个凭据\n", _credentialCount);
+    LOG_T("[WiFi] 初始化完成，已保存 %d 个凭据", _credentialCount);
 }
 
 void WiFiManager::saveCredentials(const String& ssid, const String& password) {
@@ -168,7 +169,7 @@ save:
         _preferences.putBytes(ssidKey.c_str(), _credentials[i].ssid.c_str(), _credentials[i].ssid.length() + 1);
         _preferences.putBytes(passKey.c_str(), _credentials[i].password.c_str(), _credentials[i].password.length() + 1);
     }
-    Serial.printf("[WiFi] 已保存 %d 个凭据\n", _credentialCount);
+    LOG_T("[WiFi] 已保存 %d 个凭据", _credentialCount);
 }
 
 bool WiFiManager::loadCredentials() {
@@ -203,7 +204,7 @@ bool WiFiManager::loadCredentials() {
         }
     }
 
-    Serial.printf("[WiFi] 从 NVS 加载 %d 个凭据\n", _credentialCount);
+    LOG_T("[WiFi] 从 NVS 加载 %d 个凭据", _credentialCount);
     return _credentialCount > 0;
 }
 
@@ -213,7 +214,7 @@ bool WiFiManager::hasSavedCredentials() {
 
 void WiFiManager::setTxPower(int percentage) {
     _txPower = constrain(percentage, 0, 100);
-    Serial.printf("[WiFi] TX 功率设置为 %d%%\n", _txPower);
+    LOG_T("[WiFi] TX 功率设置为 %d%%", _txPower);
 }
 
 void WiFiManager::applyTxPower() {
@@ -240,21 +241,21 @@ bool WiFiManager::connectToWiFi(const String& ssid, const String& password) {
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("[WiFi] 已连接: %s, IP: %s\n", ssid.c_str(), WiFi.localIP().toString().c_str());
+        LOG_T("[WiFi] 已连接: %s, IP: %s", ssid.c_str(), WiFi.localIP().toString().c_str());
         _reconnectCount = 0;
         return true;
     }
 
-    Serial.printf("[WiFi] 连接失败: %s\n", ssid.c_str());
+    LOG_T("[WiFi] 连接失败: %s", ssid.c_str());
     return false;
 }
 
 bool WiFiManager::connect() {
-    Serial.println("[WiFi] 开始连接...");
+    LOG_LN("[WiFi] 开始连接...");
 
     if (hasSavedCredentials()) {
         for (int i = 0; i < _credentialCount; i++) {
-            Serial.printf("[WiFi] 尝试凭据 %d: %s\n", i + 1, _credentials[i].ssid.c_str());
+            LOG_T("[WiFi] 尝试凭据 %d: %s", i + 1, _credentials[i].ssid.c_str());
             if (connectToWiFi(_credentials[i].ssid, _credentials[i].password)) {
                 stopSmartConfig();
                 return true;
@@ -264,14 +265,14 @@ bool WiFiManager::connect() {
         }
     }
 
-    Serial.printf("[WiFi] 尝试默认 WiFi: %s\n", WIFI_SSID);
+    LOG_T("[WiFi] 尝试默认 WiFi: %s", WIFI_SSID);
     if (connectToWiFi(WIFI_SSID, WIFI_PASS)) {
         saveCredentials(WIFI_SSID, WIFI_PASS);
         stopSmartConfig();
         return true;
     }
 
-    Serial.println("[WiFi] 所有连接尝试失败，进入 AP 模式和 ESP-Touch SmartConfig");
+    LOG_LN("[WiFi] 所有连接尝试失败，进入 AP 模式和 ESP-Touch SmartConfig");
     startAPMode();
     startSmartConfig();
     return false;
@@ -280,7 +281,7 @@ bool WiFiManager::connect() {
 void WiFiManager::disconnect() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    Serial.println("[WiFi] 已断开连接");
+    LOG_LN("[WiFi] 已断开连接");
 }
 
 void WiFiManager::maintainConnection() {
@@ -302,10 +303,10 @@ void WiFiManager::maintainConnection() {
     _lastReconnectAttempt = now;
 
     _reconnectCount++;
-    Serial.printf("[WiFi] 断连，尝试重连 (尝试 %d)\n", _reconnectCount);
+    LOG_T("[WiFi] 断连，尝试重连 (尝试 %d)", _reconnectCount);
 
     if (_reconnectCount > MAX_RECONNECT_ATTEMPTS) {
-        Serial.println("[WiFi] 重连次数过多，进入 AP 模式和 ESP-Touch SmartConfig");
+        LOG_LN("[WiFi] 重连次数过多，进入 AP 模式和 ESP-Touch SmartConfig");
         startAPMode();
         startSmartConfig();
         return;
@@ -345,7 +346,7 @@ void WiFiManager::startAPMode() {
 
     WiFi.mode(WIFI_AP);
     if (!WiFi.softAP(apSSID.c_str(), "12345678")) {
-        Serial.println("[WiFi] AP 启动失败！");
+        LOG_LN("[WiFi] AP 启动失败！");
         return;
     }
 
@@ -364,9 +365,9 @@ void WiFiManager::startAPMode() {
         _server->begin();
     }
 
-    Serial.printf("[WiFi] AP 模式已启动: %s, IP: %s\n",
+    LOG_T("[WiFi] AP 模式已启动: %s, IP: %s",
                   apSSID.c_str(), WiFi.softAPIP().toString().c_str());
-    Serial.println("[WiFi] 密码: 12345678");
+    LOG_LN("[WiFi] 密码: 12345678");
 }
 
 void WiFiManager::stopAPMode() {
@@ -389,7 +390,7 @@ void WiFiManager::stopAPMode() {
     WiFi.softAPdisconnect(true);
     // 切回 STA 模式，便于后续重新连接
     WiFi.mode(WIFI_STA);
-    Serial.println("[WiFi] AP 模式已停止");
+    LOG_LN("[WiFi] AP 模式已停止");
 }
 
 bool WiFiManager::isAPStarted() {
@@ -407,7 +408,7 @@ void WiFiManager::checkAPTimeout() {
     if (!_apMode || _apStartTime == 0) return;
 
     if (millis() - _apStartTime >= AP_TIMEOUT_MS) {
-        Serial.println("[WiFi] AP 超时 (10分钟)，自动停止");
+        LOG_LN("[WiFi] AP 超时 (10分钟)，自动停止");
         stopAPMode();
     }
 }
@@ -543,56 +544,55 @@ String WiFiManager::getSSID() {
 void WiFiManager::startSmartConfig() {
     if (_smartConfigStarted) return;
 
-    Serial.println("[SmartConfig] 启动 ESP-Touch SmartConfig...");
+    LOG_LN("[SmartConfig] 启动 ESP-Touch SmartConfig...");
 
     WiFi.beginSmartConfig();
     _smartConfigStarted = true;
     _smartConfigStartTime = millis();
 
-    Serial.println("[SmartConfig] 等待 ESP-Touch 广播...");
+    LOG_LN("[SmartConfig] 等待 ESP-Touch 广播...");
 }
 
 void WiFiManager::stopSmartConfig() {
     if (!_smartConfigStarted) return;
 
-    Serial.println("[SmartConfig] 停止 SmartConfig...");
+    LOG_LN("[SmartConfig] 停止 SmartConfig...");
 
     WiFi.stopSmartConfig();
     _smartConfigStarted = false;
     _smartConfigStartTime = 0;
 
-    Serial.println("[SmartConfig] 已停止");
+    LOG_LN("[SmartConfig] 已停止");
 }
 
 void WiFiManager::handleSmartConfig() {
     if (!_smartConfigStarted) return;
 
     if (WiFi.smartConfigDone()) {
-        Serial.println("[SmartConfig] 收到 ESP-Touch 配置！");
+        LOG_LN("[SmartConfig] 收到 ESP-Touch 配置！");
 
         String ssid = WiFi.SSID();
         String password = WiFi.psk();
 
-        Serial.print("[SmartConfig] SSID: ");
-        Serial.println(ssid);
+        LOG_T("[SmartConfig] SSID: %s", ssid.c_str());
 
         saveCredentials(ssid, password);
 
         stopAPMode();
         stopSmartConfig();
 
-        Serial.println("[SmartConfig] 配置已保存，正在连接...");
+        LOG_LN("[SmartConfig] 配置已保存，正在连接...");
         if (connectToWiFi(ssid, password)) {
-            Serial.println("[SmartConfig] 连接成功！");
+            LOG_LN("[SmartConfig] 连接成功！");
         } else {
-            Serial.println("[SmartConfig] 连接失败，重新启动 AP 和 SmartConfig");
+            LOG_LN("[SmartConfig] 连接失败，重新启动 AP 和 SmartConfig");
             startAPMode();
             startSmartConfig();
         }
     }
 
     if (_smartConfigStartTime > 0 && (millis() - _smartConfigStartTime) >= SMART_CONFIG_TIMEOUT_MS) {
-        Serial.println("[SmartConfig] 超时 (2分钟)，停止 SmartConfig");
+        LOG_LN("[SmartConfig] 超时 (2分钟)，停止 SmartConfig");
         stopSmartConfig();
     }
 }

@@ -1,4 +1,5 @@
 #include "SensorHistory.h"
+#include "Log.h"
 #include <time.h>
 
 SensorHistory::SensorHistory(const char* filenamePrefix) 
@@ -41,7 +42,7 @@ int SensorHistory::getCount() const {
 void SensorHistory::reset() {
     _head = 0;
     _count = 0;
-    Serial.println("[SensorHistory] 数据已重置");
+    LOG_LN("[SensorHistory] 数据已重置");
 }
 
 // 获取一年中的第几天
@@ -71,9 +72,9 @@ void SensorHistory::cleanOldFiles() {
         
         if (SPIFFS.exists(oldFilename)) {
             if (SPIFFS.remove(oldFilename)) {
-                Serial.printf("[SensorHistory] 删除 %d 天前的旧文件: %s\n", i, oldFilename);
+                LOG_T("[SensorHistory] 删除 %d 天前的旧文件: %s", i, oldFilename);
             } else {
-                Serial.printf("[SensorHistory] 删除失败: %s\n", oldFilename);
+                LOG_T("[SensorHistory] 删除失败: %s", oldFilename);
             }
         }
     }
@@ -88,11 +89,11 @@ void SensorHistory::checkDayChange(uint8_t currentHour, uint8_t currentMinute) {
     }
     
     if (currentDay != _lastDayOfYear) {
-        Serial.printf("[SensorHistory] 日期变化: %d -> %d\n", _lastDayOfYear, currentDay);
-        
+        LOG_T("[SensorHistory] 日期变化: %d -> %d", _lastDayOfYear, currentDay);
+
         char oldFilename[32];
         getFilenameForDay(oldFilename, sizeof(oldFilename), -1);
-        Serial.printf("[SensorHistory] 保存前一天数据到 %s\n", oldFilename);
+        LOG_T("[SensorHistory] 保存前一天数据到 %s", oldFilename);
         
         if (_count > 0) {
             saveToFile(oldFilename);
@@ -129,7 +130,7 @@ void SensorHistory::saveToFile() {
 void SensorHistory::saveToFile(const char* filename) {
     fs::File file = SPIFFS.open(filename, FILE_WRITE);
     if (!file) {
-        Serial.printf("[SensorHistory] 保存失败: %s\n", filename);
+        LOG_T("[SensorHistory] 保存失败: %s", filename);
         return;
     }
     
@@ -147,7 +148,7 @@ void SensorHistory::saveToFile(const char* filename) {
     }
     
     file.close();
-    Serial.printf("[SensorHistory] 已保存 %d/%d 条记录到 %s\n", savedCount, countToSave, filename);
+    LOG_T("[SensorHistory] 已保存 %d/%d 条记录到 %s", savedCount, countToSave, filename);
 }
 
 bool SensorHistory::loadFromFile() {
@@ -159,7 +160,7 @@ bool SensorHistory::loadFromFile() {
 bool SensorHistory::loadFromFile(const char* filename) {
     fs::File file = SPIFFS.open(filename, FILE_READ);
     if (!file) {
-        Serial.printf("[SensorHistory] 文件不存在: %s\n", filename);
+        LOG_T("[SensorHistory] 文件不存在: %s", filename);
         return false;
     }
     
@@ -170,7 +171,7 @@ bool SensorHistory::loadFromFile(const char* filename) {
     }
     
     if (fileCount <= 0 || fileCount > MAX_SAMPLES) {
-        Serial.printf("[SensorHistory] 文件记录数异常: %d\n", fileCount);
+        LOG_T("[SensorHistory] 文件记录数异常: %d", fileCount);
         file.close();
         return false;
     }
@@ -197,7 +198,7 @@ bool SensorHistory::loadFromFile(const char* filename) {
     getLocalTime(&timeinfo);
     _lastDayOfYear = timeinfo.tm_yday;
     
-    Serial.printf("[SensorHistory] 从 %s 加载 %d 条记录\n", filename, loadedCount);
+    LOG_T("[SensorHistory] 从 %s 加载 %d 条记录", filename, loadedCount);
     return loadedCount > 0;
 }
 

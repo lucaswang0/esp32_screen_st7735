@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "Log.h"
 #include "SharedState.h"
 #include "DHT11Sensor.h"
 #include <SPIFFS.h>
@@ -28,10 +29,12 @@
 #define BACKLIGHT_PERCENT       80
 
 // ============================================================================
-// MQTT 配置
+// MQTT 配置  恢复原服务器（10.43.1.201）
 // ============================================================================
-#define MQTT_SERVER "10.45.1.3"
+#define MQTT_SERVER "mqtt.covid.ccwu.cc"
 #define MQTT_PORT   1883
+#define MQTT_USER   "admin"
+#define MQTT_PASS   "lwei2HRTINQz"
 
 // ============================================================================
 // 全局对象
@@ -58,6 +61,7 @@ void setup() {
     Serial.println("\n╔══════════════════════════════════════╗");
     Serial.println("║     ✨ 现代时钟 v2.1 (FreeRTOS) ✨   ║");
     Serial.println("╚══════════════════════════════════════╝");
+    LOG_T("[MAIN] 启动 v2.1 (uptime=%lu ms)", millis());
 
     // 1. 互斥锁和共享状态
     initSharedState();
@@ -87,7 +91,7 @@ void setup() {
 
     // 6. SPIFFS
     if (!SPIFFS.begin(true)) {
-        Serial.println("[SPIFFS] 初始化失败");
+        LOG_LN("[SPIFFS] 初始化失败");
     }
     sensorHistory1.loadFromFile();
     sensorHistory2.loadFromFile();
@@ -96,7 +100,7 @@ void setup() {
     wifiManager.begin();
 
     // 8. MQTT / Web 服务初始化（实际运行由各自任务处理）
-    mqtt.begin(MQTT_SERVER, MQTT_PORT);
+    mqtt.begin(MQTT_SERVER, MQTT_PORT, MQTT_USER, MQTT_PASS);
     webServer.begin();
 
     // 9. 页面初始化
@@ -104,7 +108,7 @@ void setup() {
     initChartPage();
 
     // 10. 首次绘制
-    Serial.println("[OK] 初始化完成");
+    LOG_LN("[OK] 初始化完成");
     drawBg();
     delay(500);
     drawClockPage();
@@ -131,7 +135,7 @@ void loop() {
         drawBg();
         if (currentPage == 0) drawClockPage();
         else                  drawChartPage();
-        Serial.printf("[UI] 切换到页面 %d\n", currentPage);
+        LOG_T("[UI] 切换到页面 %d", currentPage);
     }
 
     // 2. 每秒刷新动态部分

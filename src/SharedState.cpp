@@ -1,4 +1,5 @@
 #include "SharedState.h"
+#include "Log.h"
 
 // ============================================================================
 // 全局互斥锁
@@ -28,7 +29,7 @@ void initSharedState() {
     xHistoryMutex   = xSemaphoreCreateMutex();
 
     if (!xSensorMutex || !xTimeMutex || !xHistoryMutex) {
-        Serial.println("[SharedState] 互斥锁创建失败！");
+        LOG_LN("[SharedState] 互斥锁创建失败！");
         while (1) { delay(1000); }
     }
 }

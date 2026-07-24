@@ -1,4 +1,5 @@
 #include "ClockPage.h"
+#include "Log.h"
 #include "Display.h"
 #include "DHT11Sensor.h"
 #include "SharedState.h"
@@ -76,7 +77,7 @@ void debugPrint(const char* region, int y, int presetH, const lgfx::IFont* font,
     if (!ENABLE_DEBUG) return;
     int actualH = getFontHeight(font);
     int endY = y + presetH - 1;
-    Serial.printf("[%s] y=%d~%d | 预设高度=%d | 字体高度=%d | ", 
+    Serial.printf(LOG_TIME_FMT "[%s] y=%d~%d | 预设高度=%d | 字体高度=%d | ", LOG_TIME_VAL,
                   region, y, endY, presetH, actualH);
     if (actualH > presetH) {
         Serial.printf("⚠️ 字体超出区域 %dpx!\n", actualH - presetH);
@@ -85,7 +86,7 @@ void debugPrint(const char* region, int y, int presetH, const lgfx::IFont* font,
     } else {
         Serial.printf("✅ 高度匹配\n");
     }
-    Serial.printf("    └─ 内容: %s\n", content);
+    Serial.printf(LOG_TIME_FMT "    └─ 内容: %s\n", LOG_TIME_VAL, content);
 }
 
 void clearRectDebug(int x, int y, int w, int h, const char* region) {
@@ -265,7 +266,7 @@ void initClockPage() {
     
     initFlipClockWidget(0, TIME_Y, 128, TIME_H);
     
-    Serial.println("[ClockPage] 初始化完成");
+    LOG_LN("[ClockPage] 初始化完成");
 }
 
 void drawClockPage() {
@@ -303,7 +304,7 @@ void drawClockPage() {
     drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, true);
     drawBottomStatus(millis(), true);
 
-    Serial.println("[ClockPage] 完整绘制完成");
+    LOG_LN("[ClockPage] 完整绘制完成");
 }
 
 void updateClockPage() {

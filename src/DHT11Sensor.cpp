@@ -1,4 +1,5 @@
 #include "DHT11Sensor.h"
+#include "Log.h"
 #include <freertos/FreeRTOS.h>
 
 DHT11Sensor::DHT11Sensor(int pin) 
@@ -10,7 +11,7 @@ void DHT11Sensor::begin() {
     pinMode(_pin, OUTPUT);
     digitalWrite(_pin, HIGH);
     delay(100);  // 上电稳定（仅执行一次，后续 readSensor() 中不再等待）
-    Serial.printf("[DHT11] 初始化完成 | 引脚: GPIO%d | 更新间隔: %dms\n", _pin, _updateInterval);
+    LOG_T("[DHT11] 初始化完成 | 引脚: GPIO%d | 更新间隔: %dms", _pin, _updateInterval);
 }
 
 void DHT11Sensor::update() {
@@ -66,7 +67,7 @@ bool DHT11Sensor::readSensor() {
         startTime = micros();
         while (digitalRead(_pin) == HIGH) {
             if (micros() - startTime > 300) {  // 放宽到 300μs，容忍 SPI/WiFi 中断
-                Serial.printf("[DHT11] 等待低电平超时 | 引脚: GPIO%d\n", _pin);
+                LOG_T("[DHT11] 等待低电平超时 | 引脚: GPIO%d", _pin);
                 goto read_done;
             }
         }
@@ -74,7 +75,7 @@ bool DHT11Sensor::readSensor() {
         startTime = micros();
         while (digitalRead(_pin) == LOW) {
             if (micros() - startTime > 300) {
-                Serial.printf("[DHT11] 等待高电平超时 | 引脚: GPIO%d\n", _pin);
+                LOG_T("[DHT11] 等待高电平超时 | 引脚: GPIO%d", _pin);
                 goto read_done;
             }
         }
@@ -82,7 +83,7 @@ bool DHT11Sensor::readSensor() {
         startTime = micros();
         while (digitalRead(_pin) == HIGH) {
             if (micros() - startTime > 300) {
-                Serial.printf("[DHT11] 等待数据位超时 | 引脚: GPIO%d\n", _pin);
+                LOG_T("[DHT11] 等待数据位超时 | 引脚: GPIO%d", _pin);
                 goto read_done;
             }
         }
@@ -92,7 +93,7 @@ bool DHT11Sensor::readSensor() {
                 startTime = micros();
                 while (digitalRead(_pin) == LOW) {
                     if (micros() - startTime > 300) {
-                        Serial.printf("[DHT11] 数据位低电平超时 | 引脚: GPIO%d | 字节:%d 位:%d\n", _pin, i, j);
+                        LOG_T("[DHT11] 数据位低电平超时 | 引脚: GPIO%d | 字节:%d 位:%d", _pin, i, j);
                         goto read_done;
                     }
                 }
@@ -102,7 +103,7 @@ bool DHT11Sensor::readSensor() {
                 startTime = micros();
                 while (digitalRead(_pin) == HIGH) {
                     if (micros() - startTime > 300) {  // 放宽到 300μs
-                        Serial.printf("[DHT11] 数据位高电平超时 | 引脚: GPIO%d | 字节:%d 位:%d\n", _pin, i, j);
+                        LOG_T("[DHT11] 数据位高电平超时 | 引脚: GPIO%d | 字节:%d 位:%d", _pin, i, j);
                         goto read_done;
                     }
                 }
@@ -124,7 +125,7 @@ bool DHT11Sensor::readSensor() {
 
         if (!thisAttemptOk) {
             if (attempt < MAX_RETRY) {
-                Serial.printf("[DHT11] 第 %d 次失败，重试 | 引脚: GPIO%d\n", attempt, _pin);
+                LOG_T("[DHT11] 第 %d 次失败，重试 | 引脚: GPIO%d", attempt, _pin);
             }
             continue;
         }
@@ -132,34 +133,34 @@ bool DHT11Sensor::readSensor() {
         if ((data[0] + data[1] + data[2] + data[3]) == data[4]) {
             // 拒绝全零数据：5 字节全 0 时校验和碰巧通过（0+0+0+0=0），实际是通信异常
             if (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0) {
-                Serial.printf("[DHT11] 全零数据 | 引脚: GPIO%d\n", _pin);
+                LOG_T("[DHT11] 全零数据 | 引脚: GPIO%d", _pin);
                 if (attempt < MAX_RETRY) {
-                    Serial.printf("[DHT11] 第 %d 次失败，重试 | 引脚: GPIO%d\n", attempt, _pin);
+                    LOG_T("[DHT11] 第 %d 次失败，重试 | 引脚: GPIO%d", attempt, _pin);
                 }
                 continue;
             }
             _humidity = data[0] + data[1] * 0.1;
             _temperature = data[2] + data[3] * 0.1;
             if (attempt > 1) {
-                Serial.printf("[DHT11] 第 %d 次重试成功 | 引脚: GPIO%d | 温度: %.1f°C | 湿度: %.1f%% | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\n",
+                LOG_T("[DHT11] 第 %d 次重试成功 | 引脚: GPIO%d | 温度: %.1f°C | 湿度: %.1f%% | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
                               attempt, _pin, _temperature, _humidity, data[0], data[1], data[2], data[3], data[4]);
             } else {
-                Serial.printf("[DHT11] 读取成功 | 引脚: GPIO%d | 温度: %.1f°C | 湿度: %.1f%% | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\n",
+                LOG_T("[DHT11] 读取成功 | 引脚: GPIO%d | 温度: %.1f°C | 湿度: %.1f%% | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
                               _pin, _temperature, _humidity, data[0], data[1], data[2], data[3], data[4]);
             }
             readOk = true;
             break;
         }
 
-        Serial.printf("[DHT11] 校验失败 | 引脚: GPIO%d | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X | 校验和: 0x%02X (期望: 0x%02X)\n",
+        LOG_T("[DHT11] 校验失败 | 引脚: GPIO%d | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X | 校验和: 0x%02X (期望: 0x%02X)",
                       _pin, data[0], data[1], data[2], data[3], data[4], (data[0] + data[1] + data[2] + data[3]) & 0xFF);
         if (attempt < MAX_RETRY) {
-            Serial.printf("[DHT11] 第 %d 次失败，重试 | 引脚: GPIO%d\n", attempt, _pin);
+            LOG_T("[DHT11] 第 %d 次失败，重试 | 引脚: GPIO%d", attempt, _pin);
         }
     }
 
     if (!readOk) {
-        Serial.printf("[DHT11] 连续 %d 次失败 | 引脚: GPIO%d\n", MAX_RETRY, _pin);
+        LOG_T("[DHT11] 连续 %d 次失败 | 引脚: GPIO%d", MAX_RETRY, _pin);
     }
 
     return readOk;

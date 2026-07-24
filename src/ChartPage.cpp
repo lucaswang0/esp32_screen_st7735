@@ -1,4 +1,5 @@
 #include "ChartPage.h"
+#include "Log.h"
 #include "Display.h"
 #include "DHT11Sensor.h"
 #include "SharedState.h"
@@ -44,6 +45,13 @@ const int LABEL_COL2     = 66;
 
 const int GRID_COLS      = 6;
 const int GRID_ROWS      = 4;
+
+// ============================================================================
+// 双缓冲 sprite（消除每秒重绘的闪烁）
+// ============================================================================
+static lgfx::LGFX_Sprite* chart1_sprite = nullptr;
+static lgfx::LGFX_Sprite* chart2_sprite = nullptr;
+static bool chart_sprites_ok = false;
 
 // ============================================================================
 // 缓存变量
@@ -105,58 +113,58 @@ void getValueRange(SensorHistory& history1, SensorHistory& history2,
 }
 
 // ========== 绘制背景网格 ==========
-void drawGrid(int chartY, int chartH, bool showLabels, 
-              SensorHistory& history1, SensorHistory& history2, 
+void drawGrid(lgfx::LovyanGFX& dst, int chartY, int chartH, bool showLabels,
+              SensorHistory& history1, SensorHistory& history2,
               bool useTemp) {
-    tft.setTextDatum(top_left);
-    tft.setFont(&lgfx::fonts::Font0);
-    tft.setTextColor(GRID_LABEL);
-    
+    dst.setTextDatum(top_left);
+    dst.setFont(&lgfx::fonts::Font0);
+    dst.setTextColor(GRID_LABEL);
+
     float minVal, maxVal;
     getValueRange(history1, history2, useTemp, minVal, maxVal);
     float range = maxVal - minVal;
     if (range < 1.0f) range = 1.0f;
-    
+
     struct tm timeinfo;
     getLocalTime(&timeinfo);
     int currentHour = timeinfo.tm_hour;
     int currentMinute = timeinfo.tm_min;
-    
+
     const int TOTAL_HOURS = 24;
     int totalMinutes = TOTAL_HOURS * 60;
-    
+
     for (int i = 0; i <= GRID_COLS; i++) {
         int x = (i * CHART_W) / GRID_COLS;
-        tft.drawLine(x, chartY, x, chartY + chartH - 1, GRID_COLOR);
-        
+        dst.drawLine(x, chartY, x, chartY + chartH - 1, GRID_COLOR);
+
         if (showLabels && i < GRID_COLS) {
             char label[8];
             int labelHour = (i * TOTAL_HOURS) / GRID_COLS;
             snprintf(label, sizeof(label), "%02d", labelHour);
-            tft.drawString(label, x + 2, chartY + chartH - 8);
+            dst.drawString(label, x + 2, chartY + chartH - 8);
         }
     }
-    
+
     if (showLabels) {
         float currentXf = ((float)(currentHour * 60 + currentMinute) / totalMinutes) * CHART_W;
         int currentX = constrain((int)currentXf, 0, CHART_W - 2);
-        tft.drawLine(currentX, chartY, currentX, chartY + chartH - 1, tft.color565(100, 100, 80));
-        
+        dst.drawLine(currentX, chartY, currentX, chartY + chartH - 1, tft.color565(100, 100, 80));
+
         // "现在"文字位置：靠右显示，避免被左边框裁剪
-        tft.setTextColor(tft.color565(100, 200, 100));
+        dst.setTextColor(tft.color565(100, 200, 100));
         if (currentX < 20) {
-            tft.drawString("现在", currentX + 2, chartY + chartH - 8);
+            dst.drawString("现在", currentX + 2, chartY + chartH - 8);
         } else if (currentX > CHART_W - 24) {
-            tft.drawString("现在", currentX - 22, chartY + chartH - 8);
+            dst.drawString("现在", currentX - 22, chartY + chartH - 8);
         } else {
-            tft.drawString("现在", currentX - 12, chartY + chartH - 8);
+            dst.drawString("现在", currentX - 12, chartY + chartH - 8);
         }
     }
-    
+
     for (int i = 0; i <= GRID_ROWS; i++) {
         int y = chartY + (i * (chartH - 1)) / GRID_ROWS;
-        tft.drawLine(0, y, CHART_W - 1, y, GRID_COLOR);
-        
+        dst.drawLine(0, y, CHART_W - 1, y, GRID_COLOR);
+
         if (showLabels) {
             char label[8];
             float val = maxVal - (i * range) / GRID_ROWS;
@@ -165,16 +173,17 @@ void drawGrid(int chartY, int chartH, bool showLabels,
             } else {
                 snprintf(label, sizeof(label), "%.0f", val);
             }
-            tft.drawString(label, 2, y - 4);
+            dst.drawString(label, 2, y - 4);
         }
     }
-    
-    tft.drawRect(0, chartY, CHART_W, chartH, DIM_TEXT);
+
+    dst.drawRect(0, chartY, CHART_W, chartH, DIM_TEXT);
 }
 
 void drawDoubleCurve(
-    int chartY, 
-    int chartH, 
+    lgfx::LovyanGFX& dst,
+    int chartY,
+    int chartH,
     SensorHistory& history1,
     SensorHistory& history2,
     uint16_t color1,
@@ -183,58 +192,58 @@ void drawDoubleCurve(
 ) {
     int count1 = history1.getCount();
     int count2 = history2.getCount();
-    
+
     if (count1 < 1 && count2 < 1) return;
-    
+
     struct tm timeinfo;
     getLocalTime(&timeinfo);
     int currentMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
-    
+
     const int TOTAL_HOURS = 24;
     int totalMinutes = TOTAL_HOURS * 60;
     int firstMinutes = 0;
-    
+
     float minVal, maxVal;
     getValueRange(history1, history2, useTemp, minVal, maxVal);
     float range = maxVal - minVal;
     if (range < 1.0f) range = 1.0f;
-    
+
     int chartBottom = chartY + chartH - 1;
-    
+
     auto drawHistoryCurve = [&](SensorHistory& history, int count, uint16_t color) {
         for (int i = 0; i < count - 1; i++) {
             const SensorSample& s1 = history.getSample(i);
             const SensorSample& s2 = history.getSample(i + 1);
-            
+
             int sample1Minutes = s1.hour * 60 + s1.minute;
             int sample2Minutes = s2.hour * 60 + s2.minute;
-            
+
             if (sample2Minutes < firstMinutes || sample1Minutes > totalMinutes) {
                 continue;
             }
-            
+
             float x1f = ((float)(sample1Minutes - firstMinutes) / totalMinutes) * CHART_W;
             float x2f = ((float)(sample2Minutes - firstMinutes) / totalMinutes) * CHART_W;
-            
+
             x1f = constrain(x1f, 0.0f, (float)CHART_W);
             x2f = constrain(x2f, 0.0f, (float)CHART_W);
-            
+
             int x1 = (int)x1f;
             int x2 = (int)x2f;
-            
+
             float v1 = useTemp ? s1.temp : s1.humidity;
             float v2 = useTemp ? s2.temp : s2.humidity;
-            
+
             int y1 = chartBottom - (int)(((v1 - minVal) / range) * (chartH - 2));
             int y2 = chartBottom - (int)(((v2 - minVal) / range) * (chartH - 2));
-            
+
             y1 = constrain(y1, chartY, chartBottom);
             y2 = constrain(y2, chartY, chartBottom);
-            
-            tft.drawLine(x1, y1, x2, y2, color);
+
+            dst.drawLine(x1, y1, x2, y2, color);
         }
     };
-    
+
     if (count1 >= 2) drawHistoryCurve(history1, count1, color1);
     if (count2 >= 2) drawHistoryCurve(history2, count2, color2);
 }
@@ -339,11 +348,24 @@ static void readAndCacheSensors() {
     if (snap.h2Ok) s_prevH2 = s_hum2;  else if (s_prevH2 != -999) s_hum2  = s_prevH2;
 }
 
-// 重绘单个图表（标签栏 + 网格 + 曲线）
+// 重绘单个图表到 sprite 后原子推屏（消除闪烁）
 static void redrawChart(int y, int h, bool useTemp, uint16_t c1, uint16_t c2) {
-    clearRect(CHART_X, y, CHART_W, h);
-    drawGrid(y, h, true, sensorHistory1, sensorHistory2, useTemp);
-    drawDoubleCurve(y, h, sensorHistory1, sensorHistory2, c1, c2, useTemp);
+    lgfx::LGFX_Sprite* sp = nullptr;
+    if (y == CHART1_Y) sp = chart1_sprite;
+    else if (y == CHART2_Y) sp = chart2_sprite;
+
+    if (chart_sprites_ok && sp) {
+        // 离屏画完整帧，再一次性推屏 → 无闪烁
+        sp->fillSprite(BG_DARK);
+        drawGrid(*sp, 0, h, true, sensorHistory1, sensorHistory2, useTemp);
+        drawDoubleCurve(*sp, 0, h, sensorHistory1, sensorHistory2, c1, c2, useTemp);
+        sp->pushSprite(CHART_X, y);
+    } else {
+        // sprite 不可用时的降级路径（直接画到屏幕，会闪烁但功能正常）
+        clearRect(CHART_X, y, CHART_W, h);
+        drawGrid(tft, y, h, true, sensorHistory1, sensorHistory2, useTemp);
+        drawDoubleCurve(tft, y, h, sensorHistory1, sensorHistory2, c1, c2, useTemp);
+    }
 }
 
 // ============================================================================
@@ -380,15 +402,30 @@ void drawChartPage() {
     redrawChart(CHART2_Y, CHART2_H, false, TFT_CYAN, GREEN);
     
     chartInitialized = true;
-    Serial.println("[ChartPage] 完整绘制");
+    LOG_LN("[ChartPage] 完整绘制");
 }
 
 // ============================================================================
 // 初始化图表页面
 // ============================================================================
 void initChartPage() {
+    if (!chart1_sprite) chart1_sprite = new lgfx::LGFX_Sprite(&tft);
+    if (!chart2_sprite) chart2_sprite = new lgfx::LGFX_Sprite(&tft);
+    if (!chart_sprites_ok) {
+        bool ok1 = chart1_sprite->createSprite(CHART_W, CHART1_H);
+        bool ok2 = chart2_sprite->createSprite(CHART_W, CHART2_H);
+        chart_sprites_ok = ok1 && ok2;
+        if (chart_sprites_ok) {
+            chart1_sprite->setSwapBytes(true);
+            chart2_sprite->setSwapBytes(true);
+            LOG_T("[ChartPage] sprite 双缓冲已分配 (%d+%d 字节)",
+                          CHART_W * CHART1_H * 2, CHART_W * CHART2_H * 2);
+        } else {
+            LOG_LN("[ChartPage] ⚠️ sprite 创建失败，回退到直接绘图（可能闪烁）");
+        }
+    }
     chartInitialized = false;
-    Serial.println("[ChartPage] 初始化完成");
+    LOG_LN("[ChartPage] 初始化完成");
 }
 
 // ============================================================================

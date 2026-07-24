@@ -1,4 +1,5 @@
 #include "SensorWebServer.h"
+#include "Log.h"
 #include <WebServer.h>
 #include <FS.h>
 #include "DHT11Sensor.h"
@@ -385,7 +386,7 @@ SensorWebServer::~SensorWebServer() {
 void SensorWebServer::begin() {
     _history1 = &sensorHistory1;
     _history2 = &sensorHistory2;
-    Serial.println("[WebServer] 初始化完成");
+    LOG_LN("[WebServer] 初始化完成");
 }
 
 void SensorWebServer::start() {
@@ -398,8 +399,8 @@ void SensorWebServer::start() {
 
     _server->begin();
     _running = true;
-    Serial.println("[WebServer] HTTP 服务已启动");
-    Serial.printf("[WebServer] 访问: http://%s/\n", wifiManager.getLocalIP().c_str());
+    LOG_LN("[WebServer] HTTP 服务已启动");
+    LOG_T("[WebServer] 访问: http://%s/", wifiManager.getLocalIP().c_str());
 }
 
 void SensorWebServer::stop() {
@@ -411,7 +412,7 @@ void SensorWebServer::stop() {
         _server = nullptr;
     }
     _running = false;
-    Serial.println("[WebServer] HTTP 服务已停止");
+    LOG_LN("[WebServer] HTTP 服务已停止");
 }
 
 void SensorWebServer::handleClient() {

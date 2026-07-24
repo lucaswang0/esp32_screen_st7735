@@ -1,4 +1,5 @@
 #include "TaskManager.h"
+#include "Log.h"
 #include "SharedState.h"
 #include "Display.h"
 #include "DHT11Sensor.h"
@@ -29,6 +30,11 @@ extern bool timeSynced;  // UI 状态显示用（main.cpp 全局）
 #define NTP_SERVER2   "ntp2.aliyun.com"
 #define BACKLIGHT_PERCENT 80
 #define MQTT_FORCE_PUBLISH_INTERVAL 60000
+// 与 SENSOR_PERIOD_MS 同步：两次发布至少间隔 5 秒，避免噪声抖动刷屏
+#define MQTT_MIN_PUBLISH_INTERVAL   5000
+// 噪声抑制阈值：变化量超过该值才推送，避免 DHT11 抖动刷屏
+#define MQTT_TEMP_DELTA 0.5f
+#define MQTT_HUM_DELTA  1.0f
 
 // LED 引脚（用于状态指示）
 #define LED_PIN 8
@@ -67,14 +73,14 @@ static bool syncNTP() {
     if (!s_ntpConfigured) {
         configTime(TIMEZONE_OFFSET * 3600, 0, NTP_SERVER1, NTP_SERVER2);
         s_ntpConfigured = true;
-        Serial.println("[TaskNTP] SNTP 已配置 (ntp1.aliyun.com / ntp2.aliyun.com)");
+        LOG_LN("[TaskNTP] SNTP 已配置 (ntp1.aliyun.com / ntp2.aliyun.com)");
     }
 
     struct tm t;
     int retry = 0;
     while (retry < 50) {  // 50 * 200ms = 10s
         if (getLocalTime(&t, 0)) {
-            Serial.printf("[TaskNTP] NTP 同步成功: %04d-%02d-%02d %02d:%02d:%02d\n",
+            LOG_T("[TaskNTP] NTP 同步成功: %04d-%02d-%02d %02d:%02d:%02d",
                 t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
                 t.tm_hour, t.tm_min, t.tm_sec);
             if (xSemaphoreTake(xTimeMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -89,7 +95,7 @@ static bool syncNTP() {
         vTaskDelay(pdMS_TO_TICKS(200));
         retry++;
     }
-    Serial.println("[TaskNTP] NTP 同步失败 (10秒超时)");
+    LOG_LN("[TaskNTP] NTP 同步失败 (10秒超时)");
     timeSynced = false;
     return false;
 }
@@ -108,6 +114,7 @@ static void publishDiscoveryMessages() {
 static void publishSensorData() {
     static float lastT1 = -999, lastH1 = -999, lastT2 = -999, lastH2 = -999;
     static unsigned long lastForcePublish = 0;
+    static unsigned long lastPublishMs = 0;
 
     SensorSnapshot s = getSensorSnapshot();
     if (!s.anyData) return;
@@ -120,12 +127,18 @@ static void publishSensorData() {
 
     unsigned long now = millis();
     bool forcePublish = (now - lastForcePublish >= MQTT_FORCE_PUBLISH_INTERVAL);
+    // 节流：与传感器读取周期对齐，强制发布不受限
+    bool intervalOk = forcePublish || (now - lastPublishMs >= MQTT_MIN_PUBLISH_INTERVAL);
+
     if (forcePublish) lastForcePublish = now;
 
-    if (forcePublish || t1 != lastT1) { mqtt.publish("esp32/sensor/temp1", t1); if (s.t1Ok) lastT1 = t1; }
-    if (forcePublish || h1 != lastH1) { mqtt.publish("esp32/sensor/hum1",  h1); if (s.h1Ok) lastH1 = h1; }
-    if (forcePublish || t2 != lastT2) { mqtt.publish("esp32/sensor/temp2", t2); if (s.t2Ok) lastT2 = t2; }
-    if (forcePublish || h2 != lastH2) { mqtt.publish("esp32/sensor/hum2",  h2); if (s.h2Ok) lastH2 = h2; }
+    bool anyPublished = false;
+    if (intervalOk && (forcePublish || fabsf(t1 - lastT1) >= MQTT_TEMP_DELTA)) { mqtt.publish("esp32/sensor/temp1", t1); anyPublished = true; if (s.t1Ok) lastT1 = t1; }
+    if (intervalOk && (forcePublish || fabsf(h1 - lastH1) >= MQTT_HUM_DELTA) ) { mqtt.publish("esp32/sensor/hum1",  h1); anyPublished = true; if (s.h1Ok) lastH1 = h1; }
+    if (intervalOk && (forcePublish || fabsf(t2 - lastT2) >= MQTT_TEMP_DELTA)) { mqtt.publish("esp32/sensor/temp2", t2); anyPublished = true; if (s.t2Ok) lastT2 = t2; }
+    if (intervalOk && (forcePublish || fabsf(h2 - lastH2) >= MQTT_HUM_DELTA) ) { mqtt.publish("esp32/sensor/hum2",  h2); anyPublished = true; if (s.h2Ok) lastH2 = h2; }
+
+    if (anyPublished) lastPublishMs = now;
 }
 
 // ============================================================================
@@ -156,7 +169,7 @@ static void taskSensor(void* param) {
         } else {
             badCount++;
         }
-        Serial.printf("[Sensor] T1=%.1f%s H1=%.1f%s T2=%.1f%s H2=%.1f%s | 累计: 成功=%lu 失败=%lu\n",
+        LOG_T("[Sensor] T1=%.1f%s H1=%.1f%s T2=%.1f%s H2=%.1f%s | 累计: 成功=%lu 失败=%lu",
                       t1, t1Ok ? "" : "✗", h1, h1Ok ? "" : "✗",
                       t2, t2Ok ? "" : "✗", h2, h2Ok ? "" : "✗",
                       okCount, badCount);
@@ -181,9 +194,9 @@ static void taskWiFi(void* param) {
 
         // 首次连接（一次性，connect() 内部 delay() 会让出 CPU）
         if (!initialConnectDone && !wifiManager.isAPStarted()) {
-            Serial.println("[TaskWiFi] 首次连接尝试...");
+            LOG_LN("[TaskWiFi] 首次连接尝试...");
             if (wifiManager.connect()) {
-                Serial.println("[TaskWiFi] 首次连接成功");
+                LOG_LN("[TaskWiFi] 首次连接成功");
             }
             initialConnectDone = true;
         }
@@ -300,7 +313,7 @@ static void taskSample(void* param) {
                         sensorHistory2.saveToFile();
                         xSemaphoreGive(xHistoryMutex);
                     }
-                    Serial.printf("[TaskSample] T1=%.1f H1=%.1f T2=%.1f H2=%.1f\n",
+                    LOG_T("[TaskSample] T1=%.1f H1=%.1f T2=%.1f H2=%.1f",
                                   s.t1, s.h1, s.t2, s.h2);
                 }
             }
@@ -321,7 +334,7 @@ static void taskMQTT(void* param) {
         mqtt.loop();
 
         if (mqtt.isJustConnected() && !discoverySent) {
-            Serial.println("[TaskMQTT] 连接成功，发送发现消息");
+            LOG_LN("[TaskMQTT] 连接成功，发送发现消息");
             publishDiscoveryMessages();
             discoverySent = true;
         }
@@ -368,7 +381,7 @@ static void taskBacklight(void* param) {
 // 创建所有任务（在 setup() 末尾调用）
 // ============================================================================
 void startTasks() {
-    Serial.println("[TaskManager] 创建 FreeRTOS 任务...");
+    LOG_LN("[TaskManager] 创建 FreeRTOS 任务...");
 
     xTaskCreate(taskSensor,    "Sensor",    TASK_STACK_SENSOR,    NULL, PRIO_SENSOR,    NULL);
     xTaskCreate(taskWiFi,      "WiFi",      TASK_STACK_WIFI,      NULL, PRIO_WIFI,      NULL);
@@ -379,5 +392,5 @@ void startTasks() {
     xTaskCreate(taskBacklight, "Backlight", TASK_STACK_BACKLIGHT, NULL, PRIO_BACKLIGHT, NULL);
 
     // UI 任务 = Arduino 的 loop() 任务，使用默认 stack
-    Serial.println("[TaskManager] 任务创建完成");
+    LOG_LN("[TaskManager] 任务创建完成");
 }
