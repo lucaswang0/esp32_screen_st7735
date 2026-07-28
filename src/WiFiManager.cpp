@@ -437,6 +437,7 @@ void WiFiManager::handleSave() {
 
     saveCredentials(ssid, password);
 
+    // 写入 NVS 后尝试连接
     String msg;
     if (connectToWiFi(ssid, password)) {
         msg = "✅ 连接成功！设备正在重启...";
@@ -569,21 +570,20 @@ void WiFiManager::handleSmartConfig() {
     if (!_smartConfigStarted) return;
 
     if (WiFi.smartConfigDone()) {
-        LOG_LN("[SmartConfig] 收到 ESP-Touch 配置！");
+        LOG_LN("[SmartConfig] 收到 ESP‑Touch 配置！");
 
         String ssid = WiFi.SSID();
         String password = WiFi.psk();
 
         LOG_T("[SmartConfig] SSID: %s", ssid.c_str());
 
+        // 保存到 NVS → 停止 AP 模式 → 尝试连接
         saveCredentials(ssid, password);
-
         stopAPMode();
-        stopSmartConfig();
-
-        LOG_LN("[SmartConfig] 配置已保存，正在连接...");
         if (connectToWiFi(ssid, password)) {
-            LOG_LN("[SmartConfig] 连接成功！");
+            LOG_LN("[SmartConfig] 连接成功！设备即将重启...");
+            delay(500);
+            ESP.restart();
         } else {
             LOG_LN("[SmartConfig] 连接失败，重新启动 AP 和 SmartConfig");
             startAPMode();
@@ -591,6 +591,7 @@ void WiFiManager::handleSmartConfig() {
         }
     }
 
+    // 超时处理：如果未收到配置，停止 SmartConfig
     if (_smartConfigStartTime > 0 && (millis() - _smartConfigStartTime) >= SMART_CONFIG_TIMEOUT_MS) {
         LOG_LN("[SmartConfig] 超时 (2分钟)，停止 SmartConfig");
         stopSmartConfig();

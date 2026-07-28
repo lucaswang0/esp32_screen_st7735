@@ -97,14 +97,56 @@ void clearRectDebug(int x, int y, int w, int h, const char* region) {
 }
 
 void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
+    // AP 模式：所有 WiFi 凭据尝试失败，闪烁提示用户配网
+    // 闪烁节拍独立于 force/缓存机制，保证 UI loop 每秒调用也能看到闪烁
+    static unsigned long lastBlink = 0;
+    static bool blinkOn = true;
+    static bool lastApMode = false;
+
+    if (g_wifiApMode) {
+        unsigned long now = millis();
+        if (now - lastBlink >= 500) {
+            lastBlink = now;
+            blinkOn = !blinkOn;
+            force = true;  // 触发重绘
+        }
+        if (force) {
+            clearRectDebug(0, STATUS_Y, 128, STATUS_H, "状态栏");
+            tft.setFont(&lgfx::fonts::efontCN_12);
+            tft.setTextDatum(middle_center);
+            if (blinkOn) {
+                tft.setTextColor(TFT_ORANGE);
+                tft.drawString("请配置WIFI进行联网", 64, STATUS_Y + STATUS_H / 2);
+            }
+            tft.setTextDatum(top_left);
+        }
+        lastApMode = true;
+        // 同步缓存，避免 AP 模式退出后误判状态变化
+        lastWifi = wifiConnected;
+        lastRssi = rssi;
+        lastNtp = ntpOk;
+        return;
+    }
+
+    // 退出 AP 模式：强制重绘一次恢复正常状态栏
+    if (lastApMode) {
+        force = true;
+        lastApMode = false;
+        // 重置切换缓存，避免进入 AP 时残留的 showIpMode 状态
+        showIpMode = false;
+        lastStatusSwitch = millis();
+    }
+
     bool wifiChanged = (wifiConnected != lastWifi || rssi != lastRssi);
     bool ntpChanged = (ntpOk != lastNtp);
     
-    unsigned long now = millis();
-    if (wifiConnected && (now - lastStatusSwitch >= 5000)) {
-        showIpMode = !showIpMode;
-        lastStatusSwitch = now;
-        force = true;
+    {
+        unsigned long now = millis();
+        if (wifiConnected && (now - lastStatusSwitch >= 5000)) {
+            showIpMode = !showIpMode;
+            lastStatusSwitch = now;
+            force = true;
+        }
     }
     
     if (!force && !wifiChanged && !ntpChanged) return;
@@ -117,14 +159,13 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
     tft.drawString("WiFi", 2, STATUS_Y);
     
     if (wifiConnected) {
-        tft.setTextColor(GREEN);
-        tft.drawString("●", 28, STATUS_Y);
-        
         if (showIpMode) {
             String ip = wifiManager.getLocalIP();
             tft.setTextColor(ACCENT_COLOR);
-            tft.drawString(ip, 38, STATUS_Y);
+            tft.drawString(ip, 28, STATUS_Y);
         } else {
+            tft.setTextColor(GREEN);
+            tft.drawString("●", 28, STATUS_Y);
             char rssiBuf[6];
             snprintf(rssiBuf, sizeof(rssiBuf), "%d", rssi);
             tft.setTextColor(DIM_TEXT);
