@@ -7,8 +7,8 @@
 #include <Preferences.h>
 #include <esp_wifi.h>
 
-#define WIFI_SSID      "Froad-Guest"
-#define WIFI_PASS      "Tr#d5@gL"
+#define WIFI_SSID      "Chinanet-CMCC-01"
+#define WIFI_PASS      "Yealink123"
 #define MAX_WIFI_CREDENTIALS 5
 
 typedef struct {
