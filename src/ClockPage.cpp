@@ -8,7 +8,6 @@
 #include "FlipClockPage.h"
 
 extern DHT11Sensor dht1;
-extern DHT11Sensor dht2;
 extern WiFiManager wifiManager;
 extern bool timeSynced;
 
@@ -35,14 +34,11 @@ const int TIME_H        = 32;
 const int DATE_Y        = TIME_Y + TIME_H + 4;
 const int DATE_H        = 18;
 
-const int SENSOR1_Y     = DATE_Y + DATE_H + 3;
-const int SENSOR1_H     = 12;
+const int SENSOR_Y       = DATE_Y + DATE_H + 3;
+const int SENSOR_H       = 18;
 
-const int SENSOR2_Y     = SENSOR1_Y + SENSOR1_H + 3;
-const int SENSOR2_H     = 12;
-
-const int BOTTOM_Y      = SENSOR2_Y + SENSOR2_H + 4;
-const int BOTTOM_H      = 128 - BOTTOM_Y;
+const int BOTTOM_Y       = SENSOR_Y + SENSOR_H + 4;
+const int BOTTOM_H       = 128 - BOTTOM_Y;
 
 const int LABEL_X       = 0;
 
@@ -55,10 +51,15 @@ static bool showIpMode = false;
 static unsigned long lastStatusSwitch = 0;
 
 static int lastH = -1, lastM = -1, lastS = -1;
+static int lastDisplayMinute = -1;  // 用于检测分钟是否变化
 
 static int lastDay = -1, lastWday = -1;
+static int lastDisplayDay = -1;
 
-static float lastValues[4] = {-999, -999, -999, -999};
+static float lastValues[2] = {-999, -999};
+// 传感器行：上一次绘制的文本（用于用背景色擦除残留）
+static char lastBuf1[20] = "";
+static char lastBuf2[20] = "";
 
 static int lastSeconds = -1;
 
@@ -68,6 +69,7 @@ int getFontHeight(const lgfx::IFont* font) {
     if (font == nullptr) return 0;
     if (font == &lgfx::fonts::Font7) return 28;
     if (font == &lgfx::fonts::efontCN_12) return 12;
+    if (font == &lgfx::fonts::efontCN_14) return 14;
     if (font == &lgfx::fonts::efontCN_16) return 16;
     if (font == &lgfx::fonts::Font0) return 8;
     return 12;
@@ -96,9 +98,8 @@ void clearRectDebug(int x, int y, int w, int h, const char* region) {
     }
 }
 
+// ========== 优化后的 drawStatusBar ==========
 void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
-    // AP 模式：所有 WiFi 凭据尝试失败，闪烁提示用户配网
-    // 闪烁节拍独立于 force/缓存机制，保证 UI loop 每秒调用也能看到闪烁
     static unsigned long lastBlink = 0;
     static bool blinkOn = true;
     static bool lastApMode = false;
@@ -108,7 +109,7 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
         if (now - lastBlink >= 500) {
             lastBlink = now;
             blinkOn = !blinkOn;
-            force = true;  // 触发重绘
+            force = true;
         }
         if (force) {
             clearRectDebug(0, STATUS_Y, 128, STATUS_H, "状态栏");
@@ -121,18 +122,15 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
             tft.setTextDatum(top_left);
         }
         lastApMode = true;
-        // 同步缓存，避免 AP 模式退出后误判状态变化
         lastWifi = wifiConnected;
         lastRssi = rssi;
         lastNtp = ntpOk;
         return;
     }
 
-    // 退出 AP 模式：强制重绘一次恢复正常状态栏
     if (lastApMode) {
         force = true;
         lastApMode = false;
-        // 重置切换缓存，避免进入 AP 时残留的 showIpMode 状态
         showIpMode = false;
         lastStatusSwitch = millis();
     }
@@ -156,8 +154,8 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
     tft.setTextDatum(top_left);
     
     tft.setTextColor(DIM_TEXT);
-    tft.drawString("WiFi", 2, STATUS_Y);
-    
+    tft.drawString("WiFi", 0, STATUS_Y);
+
     if (wifiConnected) {
         if (showIpMode) {
             String ip = wifiManager.getLocalIP();
@@ -175,10 +173,10 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
         tft.setTextColor(RED);
         tft.drawString("○", 28, STATUS_Y);
     }
-    
+
     tft.setTextDatum(top_right);
     tft.setTextColor(ntpOk ? GREEN : RED);
-    tft.drawString(ntpOk ? "NTP●" : "NTP○", 124, STATUS_Y);
+    tft.drawString(ntpOk ? "NTP●" : "NTP○", 127, STATUS_Y);
     tft.setTextDatum(top_left);
     
     lastWifi = wifiConnected;
@@ -186,11 +184,29 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
     lastNtp = ntpOk;
 }
 
+// ========== 优化后的 drawTime ==========
 void drawTime(int h, int m, int s, bool force) {
-    if (!force && h == lastH && m == lastM && s == lastS) return;
+    int currentMinute = h * 60 + m;
     
+    // 如果没有任何变化，直接返回
+    if (!force && currentMinute == lastDisplayMinute && s == lastS) {
+        return;
+    }
+    
+    // 如果只是秒变化，且翻页时钟支持单独更新秒数
+    if (!force && currentMinute == lastDisplayMinute && s != lastS) {
+        // 只更新秒数（如果翻页时钟支持）
+        // 如果不支持单独更新秒数，则注释掉这个分支，让下面的代码执行
+        #ifdef FLIP_CLOCK_SUPPORTS_SECOND_UPDATE
+        updateFlipClockSeconds(s);
+        lastS = s;
+        return;
+        #endif
+    }
+    
+    // 分钟变化或强制刷新时才清空重绘
     clearRectDebug(0, TIME_Y, 128, TIME_H, "时间");
-    
+
     if (force) {
         drawFlipClockWidget(h, m, s);
     } else {
@@ -200,10 +216,16 @@ void drawTime(int h, int m, int s, bool force) {
     lastH = h;
     lastM = m;
     lastS = s;
+    lastDisplayMinute = currentMinute;
 }
 
+// ========== 优化后的 drawDate ==========
 void drawDate(int year, int month, int day, int wday, bool force) {
-    if (!force && day == lastDay && wday == lastWday) return;
+    int currentDay = year * 10000 + month * 100 + day;
+    
+    if (!force && currentDay == lastDisplayDay) {
+        return;
+    }
     
     clearRectDebug(0, DATE_Y, 128, DATE_H, "日期");
     
@@ -213,62 +235,80 @@ void drawDate(int year, int month, int day, int wday, bool force) {
     
     char dateBuf[20];
     snprintf(dateBuf, sizeof(dateBuf), "%d/%02d/%02d", year, month, day);
-    tft.drawString(dateBuf, 6, DATE_Y);
-    
+    tft.drawString(dateBuf, 0, DATE_Y);
+
     tft.setTextColor(ACCENT_COLOR);
     tft.setTextDatum(top_right);
-    
+
     char weekBuf[8];
     snprintf(weekBuf, sizeof(weekBuf), "周%s", WEEK_DAYS[wday]);
-    tft.drawString(weekBuf, 124, DATE_Y);
+    tft.drawString(weekBuf, 127, DATE_Y);
     
     lastDay = day;
     lastWday = wday;
+    lastDisplayDay = currentDay;
 }
 
+// ========== 优化后的 drawSensorRow ==========
 void drawSensorRow(int y, const char* label1, float value1, uint16_t color1,
                    const char* label2, float value2, uint16_t color2, bool force) {
-    int idx = 0;
-    if (y == SENSOR1_Y) idx = 0;
-    else if (y == SENSOR2_Y) idx = 2;
-    else return;
-    
-    bool changed = (force || value1 != lastValues[idx] || value2 != lastValues[idx + 1]);
+    if (y != SENSOR_Y) return;
+
+    // 值变化超过阈值才更新
+    bool changed = (force || 
+                    abs(value1 - lastValues[0]) > 0.05f || 
+                    abs(value2 - lastValues[1]) > 0.05f);
     if (!changed) return;
+
+    tft.setFont(&lgfx::fonts::efontCN_14);
     
-    char regionName[20];
-    snprintf(regionName, sizeof(regionName), "传感器%d", idx/2 + 1);
-    
-    clearRectDebug(0, y, 128, SENSOR1_H, regionName);
-    
-    tft.setFont(&lgfx::fonts::efontCN_12);
-    tft.setTextDatum(top_left);
-    
-    tft.setTextColor(color1);
+    // 准备新文本
     char buf1[20];
     snprintf(buf1, sizeof(buf1), "%s:%.1f°C", label1, value1);
-    tft.drawString(buf1, LABEL_X, y);
-    
-    tft.setTextColor(color2);
-    tft.setTextDatum(top_right);
     char buf2[20];
     snprintf(buf2, sizeof(buf2), "%.1f%% %s", value2, label2);
-    tft.drawString(buf2, 126, y);
-    
-    int lineX = 64;
-    tft.drawLine(lineX, y + 2, lineX, y + SENSOR1_H - 2, DIM_TEXT);
-    
-    lastValues[idx] = value1;
-    lastValues[idx + 1] = value2;
+
+    // 先用背景色擦除上一帧文本（避免新文本比旧文本短时残留字尾）
+    if (lastBuf1[0] != '\0') {
+        tft.setTextDatum(top_left);
+        tft.setTextColor(BG_COLOR);
+        tft.drawString(lastBuf1, LABEL_X, y);
+    }
+    if (lastBuf2[0] != '\0') {
+        tft.setTextDatum(top_right);
+        tft.setTextColor(BG_COLOR);
+        tft.drawString(lastBuf2, 127, y);
+    }
+
+    // 绘制新文本
+    tft.setTextDatum(top_left);
+    tft.setTextColor(color1);
+    tft.drawString(buf1, LABEL_X, y);
+    tft.setTextDatum(top_right);
+    tft.setTextColor(color2);
+    tft.drawString(buf2, 127, y);
+
+    // 缓存新文本作为下一次的"旧文本"
+    strncpy(lastBuf1, buf1, sizeof(lastBuf1));
+    lastBuf1[sizeof(lastBuf1) - 1] = '\0';
+    strncpy(lastBuf2, buf2, sizeof(lastBuf2));
+    lastBuf2[sizeof(lastBuf2) - 1] = '\0';
+
+    // 分隔线只需要绘制一次（首次或强制刷新时）
+    static bool lineDrawn = false;
+    if (force || !lineDrawn) {
+        tft.drawLine(64, y + 2, 64, y + SENSOR_H - 2, DIM_TEXT);
+        lineDrawn = true;
+    }
+
+    lastValues[0] = value1;
+    lastValues[1] = value2;
 }
 
+// ========== 优化后的 drawBottomStatus ==========
 void drawBottomStatus(unsigned long uptime, bool force) {
     int seconds = (int)(uptime / 1000);
     if (!force && seconds == lastSeconds) return;
-    
-    clearRectDebug(0, BOTTOM_Y, 128, BOTTOM_H, "底部状态");
-    tft.setFont(&lgfx::fonts::efontCN_12);
-    tft.setTextDatum(top_left);
     
     char buf[20];
     if (seconds < 60) {
@@ -278,17 +318,31 @@ void drawBottomStatus(unsigned long uptime, bool force) {
     } else {
         snprintf(buf, sizeof(buf), "运行:%dh%dm", seconds/3600, (seconds%3600)/60);
     }
-    tft.setTextColor(DIM_TEXT);
-    tft.drawString(buf, 2, BOTTOM_Y);
     
-    tft.setTextDatum(top_right);
-    tft.setTextColor(GREEN);
-    tft.drawString("传感器●", 126, BOTTOM_Y);
+    tft.setFont(&lgfx::fonts::efontCN_14);
     tft.setTextDatum(top_left);
+
+    // 清空底部状态条左侧文本区域，避免旧文本残留
+    clearRectDebug(0, BOTTOM_Y, 64, BOTTOM_H, "底部状态-文本");
+
+    // 绘制新文本
+    tft.setTextColor(DIM_TEXT);
+    tft.drawString(buf, 0, BOTTOM_Y);
+
+    // 传感器状态LED只在首次或强制刷新时绘制
+    static bool ledDrawn = false;
+    if (force || !ledDrawn) {
+        tft.setTextDatum(top_right);
+        tft.setTextColor(GREEN);
+        tft.drawString("传感器●", 127, BOTTOM_Y);
+        tft.setTextDatum(top_left);
+        ledDrawn = true;
+    }
     
     lastSeconds = seconds;
 }
 
+// ========== 初始化 ==========
 void initClockPage() {
     lastWifi = false;
     lastRssi = 999;
@@ -298,11 +352,15 @@ void initClockPage() {
     lastH = -1;
     lastM = -1;
     lastS = -1;
+    lastDisplayMinute = -1;
     lastDay = -1;
     lastWday = -1;
-    for (int i = 0; i < 4; i++) {
+    lastDisplayDay = -1;
+    for (int i = 0; i < 2; i++) {
         lastValues[i] = -999;
     }
+    lastBuf1[0] = '\0';
+    lastBuf2[0] = '\0';
     lastSeconds = -1;
     
     initFlipClockWidget(0, TIME_Y, 128, TIME_H);
@@ -310,6 +368,7 @@ void initClockPage() {
     LOG_LN("[ClockPage] 初始化完成");
 }
 
+// ========== 绘制时钟页面 ==========
 void drawClockPage() {
     struct tm timeinfo;
     getLocalTime(&timeinfo);
@@ -323,31 +382,28 @@ void drawClockPage() {
     int wday = timeinfo.tm_wday;
 
     SensorSnapshot snap = getSensorSnapshot();
-    float temp1 = snap.t1, hum1 = snap.h1, temp2 = snap.t2, hum2 = snap.h2;
+    float temp1 = snap.t1, hum1 = snap.h1;
 
-    static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
+    static float prevT1 = -999, prevH1 = -999;
     if (!snap.t1Ok && prevT1 != -999) temp1 = prevT1;
     if (!snap.h1Ok && prevH1 != -999) hum1  = prevH1;
-    if (!snap.t2Ok && prevT2 != -999) temp2 = prevT2;
-    if (!snap.h2Ok && prevH2 != -999) hum2  = prevH2;
     if (snap.t1Ok) prevT1 = temp1;
     if (snap.h1Ok) prevH1 = hum1;
-    if (snap.t2Ok) prevT2 = temp2;
-    if (snap.h2Ok) prevH2 = hum2;
 
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();
 
+    // 强制绘制所有区域（首次绘制）
     drawStatusBar(wifiConnected, rssi, timeSynced, true);
     drawTime(h, m, s, true);
     drawDate(year, month, day, wday, true);
-    drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, true);
-    drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, true);
+    drawSensorRow(SENSOR_Y, "T", temp1, ACCENT_COLOR, "H", hum1, TFT_CYAN, true);
     drawBottomStatus(millis(), true);
 
     LOG_LN("[ClockPage] 完整绘制完成");
 }
 
+// ========== 更新时钟页面（每秒调用） ==========
 void updateClockPage() {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
@@ -363,25 +419,21 @@ void updateClockPage() {
     int wday = timeinfo.tm_wday;
 
     SensorSnapshot snap = getSensorSnapshot();
-    float temp1 = snap.t1, hum1 = snap.h1, temp2 = snap.t2, hum2 = snap.h2;
+    float temp1 = snap.t1, hum1 = snap.h1;
 
-    static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
+    static float prevT1 = -999, prevH1 = -999;
     if (!snap.t1Ok && prevT1 != -999) temp1 = prevT1;
     if (!snap.h1Ok && prevH1 != -999) hum1  = prevH1;
-    if (!snap.t2Ok && prevT2 != -999) temp2 = prevT2;
-    if (!snap.h2Ok && prevH2 != -999) hum2  = prevH2;
     if (snap.t1Ok) prevT1 = temp1;
     if (snap.h1Ok) prevH1 = hum1;
-    if (snap.t2Ok) prevT2 = temp2;
-    if (snap.h2Ok) prevH2 = hum2;
 
     bool wifiConnected = wifiManager.isConnected();
     int rssi = wifiManager.getRSSI();
 
+    // 增量更新各区域
     drawStatusBar(wifiConnected, rssi, timeSynced, false);
     drawTime(h, m, s, false);
     drawDate(year, month, day, wday, false);
-    drawSensorRow(SENSOR1_Y, "T1", temp1, ACCENT_COLOR, "H1", hum1, TFT_CYAN, false);
-    drawSensorRow(SENSOR2_Y, "T2", temp2, TFT_ORANGE, "H2", hum2, TFT_GREEN, false);
+    drawSensorRow(SENSOR_Y, "T", temp1, ACCENT_COLOR, "H", hum1, TFT_CYAN, false);
     drawBottomStatus(millis(), false);
 }

@@ -8,9 +8,7 @@
 #include <time.h>
 
 extern DHT11Sensor dht1;
-extern DHT11Sensor dht2;
 extern SensorHistory sensorHistory1;
-extern SensorHistory sensorHistory2;
 extern WiFiManager wifiManager;
 
 // HTML 页面（带 Chart.js 折线图）
@@ -61,9 +59,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .sensor-value { font-size: 28px; font-weight: bold; margin: 8px 0; }
         .sensor-unit { color: #888; font-size: 14px; }
         .t1 { color: #4dabf7; }
-        .t2 { color: #ff9f43; }
         .h1 { color: #00d2ff; }
-        .h2 { color: #51cf66; }
         .footer { text-align: center; color: #888; font-size: 12px; margin-top: 30px; }
     </style>
 </head>
@@ -92,23 +88,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
         <div class="current">
             <div class="sensor">
-                <div class="sensor-label">温度 1</div>
+                <div class="sensor-label">温度</div>
                 <div class="sensor-value t1" id="temp1">--</div>
                 <div class="sensor-unit">°C</div>
             </div>
             <div class="sensor">
-                <div class="sensor-label">湿度 1</div>
+                <div class="sensor-label">湿度</div>
                 <div class="sensor-value h1" id="hum1">--</div>
-                <div class="sensor-unit">%</div>
-            </div>
-            <div class="sensor">
-                <div class="sensor-label">温度 2</div>
-                <div class="sensor-value t2" id="temp2">--</div>
-                <div class="sensor-unit">°C</div>
-            </div>
-            <div class="sensor">
-                <div class="sensor-label">湿度 2</div>
-                <div class="sensor-value h2" id="hum2">--</div>
                 <div class="sensor-unit">%</div>
             </div>
         </div>
@@ -217,8 +203,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
         const tempChart = new Chart(tempCtx, {
             type: 'line',
             data: { datasets: [
-                makeDataset('温度 1 (°C)', '#4dabf7', 'rgba(77,171,247,0.1)'),
-                makeDataset('温度 2 (°C)', '#ff9f43', 'rgba(255,159,67,0.1)')
+                makeDataset('温度 (°C)', '#4dabf7', 'rgba(77,171,247,0.1)')
             ] },
             options: { ...commonOptions, scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, suggestedMin: 0, suggestedMax: 50 } } }
         });
@@ -228,8 +213,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
         const humChart = new Chart(humCtx, {
             type: 'line',
             data: { datasets: [
-                makeDataset('湿度 1 (%)', '#00d2ff', 'rgba(0,210,255,0.1)'),
-                makeDataset('湿度 2 (%)', '#51cf66', 'rgba(81,207,102,0.1)')
+                makeDataset('湿度 (%)', '#00d2ff', 'rgba(0,210,255,0.1)')
             ] },
             options: { ...commonOptions, scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, suggestedMin: 0, suggestedMax: 100 } } }
         });
@@ -241,8 +225,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 const d = await r.json();
                 document.getElementById('temp1').textContent = d.temp1.toFixed(1);
                 document.getElementById('hum1').textContent = d.hum1.toFixed(1);
-                document.getElementById('temp2').textContent = d.temp2.toFixed(1);
-                document.getElementById('hum2').textContent = d.hum2.toFixed(1);
                 document.getElementById('rssi').textContent = d.rssi + ' dBm';
                 document.getElementById('deviceIp').textContent = d.ip;
                 document.getElementById('deviceTime').textContent = d.time;
@@ -263,7 +245,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 return out;
             };
             chart.data.datasets[0].data = toPoints(d.data1);
-            chart.data.datasets[1].data = toPoints(d.data2);
             chart.update('none');
         }
 
@@ -377,7 +358,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 SensorWebServer::SensorWebServer()
     : _server(nullptr), _running(false),
-      _history1(nullptr), _history2(nullptr) {}
+      _history1(nullptr) {}
 
 SensorWebServer::~SensorWebServer() {
     stop();
@@ -385,7 +366,6 @@ SensorWebServer::~SensorWebServer() {
 
 void SensorWebServer::begin() {
     _history1 = &sensorHistory1;
-    _history2 = &sensorHistory2;
     LOG_LN("[WebServer] 初始化完成");
 }
 
@@ -441,24 +421,18 @@ void SensorWebServer::handleNotFound() {
 
 String SensorWebServer::buildCurrentJson() const {
     SensorSnapshot snap = getSensorSnapshot();
-    float t1 = snap.t1, h1 = snap.h1, t2 = snap.t2, h2 = snap.h2;
+    float t1 = snap.t1, h1 = snap.h1;
 
     // 有效性检查：DHT11 温度 -20~60°C，湿度 1-100%RH
-    static float prevT1 = -999, prevH1 = -999, prevT2 = -999, prevH2 = -999;
+    static float prevT1 = -999, prevH1 = -999;
     if (!snap.t1Ok && prevT1 != -999) t1 = prevT1;
     if (!snap.h1Ok && prevH1 != -999) h1 = prevH1;
-    if (!snap.t2Ok && prevT2 != -999) t2 = prevT2;
-    if (!snap.h2Ok && prevH2 != -999) h2 = prevH2;
     if (snap.t1Ok) prevT1 = t1;
     if (snap.h1Ok) prevH1 = h1;
-    if (snap.t2Ok) prevT2 = t2;
-    if (snap.h2Ok) prevH2 = h2;
 
     String json = "{";
     json += "\"temp1\":" + String(t1, 1) + ",";
     json += "\"hum1\":" + String(h1, 1) + ",";
-    json += "\"temp2\":" + String(t2, 1) + ",";
-    json += "\"hum2\":" + String(h2, 1) + ",";
     json += "\"rssi\":" + String(wifiManager.getRSSI()) + ",";
     json += "\"ip\":\"" + wifiManager.getLocalIP() + "\",";
 
@@ -493,64 +467,43 @@ String SensorWebServer::buildHistoryJson(SensorHistory& history, const char* typ
         return "{\"error\":\"busy\"}";
     }
 
-    // 读取指定日期的两个传感器数据（不修改内部状态）
+    // 读取指定日期的传感器数据（不修改内部状态）
     static SensorSample buf1[MAX_SAMPLES];
-    static SensorSample buf2[MAX_SAMPLES];
     int n1 = _history1->readByDate(date, buf1, MAX_SAMPLES);
-    int n2 = _history2->readByDate(date, buf2, MAX_SAMPLES);
-    int maxN = n1 > n2 ? n1 : n2;
 
-    String labels, timestamps, data1, data2;
-    labels.reserve(maxN * 8);
-    timestamps.reserve(maxN * 6);
-    data1.reserve(maxN * 6);
-    data2.reserve(maxN * 6);
+    String labels, timestamps, data1;
+    labels.reserve(n1 * 8);
+    timestamps.reserve(n1 * 6);
+    data1.reserve(n1 * 6);
 
     labels = "[";
     timestamps = "[";
     data1 = "[";
-    data2 = "[";
 
-    for (int i = 0; i < maxN; i++) {
+    for (int i = 0; i < n1; i++) {
         if (i) {
             labels += ",";
             timestamps += ",";
             data1 += ",";
-            data2 += ",";
         }
-        // 优先用 buf1 的时间（两个传感器同时采样，时间一致）
-        const SensorSample* s;
-        if (i < n1) s = &buf1[i];
-        else        s = &buf2[i];
+        const SensorSample* s = &buf1[i];
 
         char labelBuf[8];
         snprintf(labelBuf, sizeof(labelBuf), "\"%02d:%02d\"", s->hour, s->minute);
         labels += labelBuf;
         timestamps += String(s->hour * 60 + s->minute);
 
-        if (i < n1) {
-            float v = (strcmp(type, "temp") == 0) ? buf1[i].temp : buf1[i].humidity;
-            data1 += String(v, 1);
-        } else {
-            data1 += "null";
-        }
-
-        if (i < n2) {
-            float v = (strcmp(type, "temp") == 0) ? buf2[i].temp : buf2[i].humidity;
-            data2 += String(v, 1);
-        } else {
-            data2 += "null";
-        }
+        float v = (strcmp(type, "temp") == 0) ? buf1[i].temp : buf1[i].humidity;
+        data1 += String(v, 1);
     }
     labels += "]";
     timestamps += "]";
     data1 += "]";
-    data2 += "]";
 
     xSemaphoreGive(xHistoryMutex);
     return "{\"date\":\"" + String(date ? date : "") + "\",\"labels\":" + labels +
            ",\"timestamps\":" + timestamps +
-           ",\"data1\":" + data1 + ",\"data2\":" + data2 + "}";
+           ",\"data1\":" + data1 + "}";
 }
 
 void SensorWebServer::handleApiHistory() {
@@ -587,7 +540,6 @@ void SensorWebServer::handleApiDates() {
              tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
 
     // 扫描 SPIFFS 中以 "/sensor1_" 开头、".dat" 结尾的文件，提取日期
-    // （sensor1 与 sensor2 应同时存在，仅取一份即可）
     String json = "{\"today\":\"";
     json += today;
     json += "\",\"dates\":[";

@@ -33,7 +33,6 @@ private:
 
     // 引用全局 SensorHistory（在 begin() 中注入）
     SensorHistory* _history1;
-    SensorHistory* _history2;
 
     void setupRoutes();
     void handleRoot();

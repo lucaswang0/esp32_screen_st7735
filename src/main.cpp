@@ -17,7 +17,6 @@
 // 引脚定义
 // ============================================================================
 #define DHTPIN1         6
-#define DHTPIN2         7
 #define PIN_TFT_BL      5
 #define BACKLIGHT_CHANNEL 0
 #define LED_PIN 8
@@ -40,10 +39,8 @@
 // 全局对象
 // ============================================================================
 DHT11Sensor dht1(DHTPIN1);
-DHT11Sensor dht2(DHTPIN2);
 WiFiManager wifiManager;
 SensorHistory sensorHistory1("sensor1");
-SensorHistory sensorHistory2("sensor2");
 MqttManager mqtt;
 SensorWebServer webServer;
 
@@ -87,14 +84,12 @@ void setup() {
 
     // 5. 传感器
     dht1.begin();
-    dht2.begin();
 
     // 6. SPIFFS
     if (!SPIFFS.begin(true)) {
         LOG_LN("[SPIFFS] 初始化失败");
     }
     sensorHistory1.loadFromFile();
-    sensorHistory2.loadFromFile();
 
     // 7. WiFi 管理器（实际连接由 TaskWiFi 异步进行）
     wifiManager.begin();

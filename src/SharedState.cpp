@@ -11,7 +11,7 @@ SemaphoreHandle_t xHistoryMutex   = NULL;
 // ============================================================================
 // 全局共享数据
 // ============================================================================
-SharedSensorData g_sensorData = {0, 0, 0, 0, false, 0};
+SharedSensorData g_sensorData = {0, 0, false, 0};
 SharedTimeInfo   g_timeInfo   = {{0}, false, false};
 
 // ============================================================================
@@ -38,12 +38,10 @@ void initSharedState() {
 // 线程安全访问函数
 // ============================================================================
 SensorSnapshot getSensorSnapshot() {
-    SensorSnapshot snap = {0, 0, 0, 0, false, false, false, false, false, false, 0};
+    SensorSnapshot snap = {0, 0, false, false, false, false, 0};
     if (xSemaphoreTake(xSensorMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         snap.t1 = g_sensorData.t1;
         snap.h1 = g_sensorData.h1;
-        snap.t2 = g_sensorData.t2;
-        snap.h2 = g_sensorData.h2;
         snap.anyData = g_sensorData.valid;
         snap.lastReadMs = g_sensorData.lastReadMs;
         // 范围校验
@@ -52,21 +50,17 @@ SensorSnapshot getSensorSnapshot() {
         // 全零组合（T=0 且 H=0）一律拒绝——DHT11 内部已过滤，snapshot 兜底
         snap.t1Ok = (snap.t1 > 1.0f && snap.t1 <= 50.0f) && !(snap.t1 == 0 && snap.h1 == 0);
         snap.h1Ok = (snap.h1 >= 20.0f && snap.h1 <= 90.0f) && !(snap.t1 == 0 && snap.h1 == 0);
-        snap.t2Ok = (snap.t2 > 1.0f && snap.t2 <= 50.0f) && !(snap.t2 == 0 && snap.h2 == 0);
-        snap.h2Ok = (snap.h2 >= 20.0f && snap.h2 <= 90.0f) && !(snap.t2 == 0 && snap.h2 == 0);
-        snap.allValid = snap.t1Ok && snap.h1Ok && snap.t2Ok && snap.h2Ok;
+        snap.allValid = snap.t1Ok && snap.h1Ok;
         xSemaphoreGive(xSensorMutex);
     }
     return snap;
 }
 
-void setSensorSnapshot(float t1, float h1, float t2, float h2,
-                       bool t1Ok, bool h1Ok, bool t2Ok, bool h2Ok) {
+void setSensorSnapshot(float t1, float h1,
+                       bool t1Ok, bool h1Ok) {
     if (xSemaphoreTake(xSensorMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_sensorData.t1 = t1Ok ? t1 : g_sensorData.t1;
         g_sensorData.h1 = h1Ok ? h1 : g_sensorData.h1;
-        g_sensorData.t2 = t2Ok ? t2 : g_sensorData.t2;
-        g_sensorData.h2 = h2Ok ? h2 : g_sensorData.h2;
         g_sensorData.valid = true;
         g_sensorData.lastReadMs = millis();
         xSemaphoreGive(xSensorMutex);

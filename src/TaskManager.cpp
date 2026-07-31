@@ -16,10 +16,8 @@
 // 外部全局对象（在 main.cpp 中定义）
 // ============================================================================
 extern DHT11Sensor dht1;
-extern DHT11Sensor dht2;
 extern WiFiManager wifiManager;
 extern SensorHistory sensorHistory1;
-extern SensorHistory sensorHistory2;
 extern MqttManager mqtt;
 extern SensorWebServer webServer;
 extern bool timeSynced;  // UI 状态显示用（main.cpp 全局）
@@ -105,25 +103,19 @@ static void publishDiscoveryMessages() {
         "{\"name\":\"ESP32 温度1\",\"state_topic\":\"esp32/sensor/temp1\",\"unit_of_measurement\":\"°C\",\"unique_id\":\"esp32_temp1\"}");
     mqtt.publish("homeassistant/sensor/esp32_hum1/config",
         "{\"name\":\"ESP32 湿度1\",\"state_topic\":\"esp32/sensor/hum1\",\"unit_of_measurement\":\"%\",\"unique_id\":\"esp32_hum1\"}");
-    mqtt.publish("homeassistant/sensor/esp32_temp2/config",
-        "{\"name\":\"ESP32 温度2\",\"state_topic\":\"esp32/sensor/temp2\",\"unit_of_measurement\":\"°C\",\"unique_id\":\"esp32_temp2\"}");
-    mqtt.publish("homeassistant/sensor/esp32_hum2/config",
-        "{\"name\":\"ESP32 湿度2\",\"state_topic\":\"esp32/sensor/hum2\",\"unit_of_measurement\":\"%\",\"unique_id\":\"esp32_hum2\"}");
 }
 
 static void publishSensorData() {
-    static float lastT1 = -999, lastH1 = -999, lastT2 = -999, lastH2 = -999;
+    static float lastT1 = -999, lastH1 = -999;
     static unsigned long lastForcePublish = 0;
     static unsigned long lastPublishMs = 0;
 
     SensorSnapshot s = getSensorSnapshot();
     if (!s.anyData) return;
 
-    float t1 = s.t1, h1 = s.h1, t2 = s.t2, h2 = s.h2;
+    float t1 = s.t1, h1 = s.h1;
     if (!s.t1Ok && lastT1 != -999) t1 = lastT1;
     if (!s.h1Ok && lastH1 != -999) h1 = lastH1;
-    if (!s.t2Ok && lastT2 != -999) t2 = lastT2;
-    if (!s.h2Ok && lastH2 != -999) h2 = lastH2;
 
     unsigned long now = millis();
     bool forcePublish = (now - lastForcePublish >= MQTT_FORCE_PUBLISH_INTERVAL);
@@ -135,8 +127,6 @@ static void publishSensorData() {
     bool anyPublished = false;
     if (intervalOk && (forcePublish || fabsf(t1 - lastT1) >= MQTT_TEMP_DELTA)) { mqtt.publish("esp32/sensor/temp1", t1); anyPublished = true; if (s.t1Ok) lastT1 = t1; }
     if (intervalOk && (forcePublish || fabsf(h1 - lastH1) >= MQTT_HUM_DELTA) ) { mqtt.publish("esp32/sensor/hum1",  h1); anyPublished = true; if (s.h1Ok) lastH1 = h1; }
-    if (intervalOk && (forcePublish || fabsf(t2 - lastT2) >= MQTT_TEMP_DELTA)) { mqtt.publish("esp32/sensor/temp2", t2); anyPublished = true; if (s.t2Ok) lastT2 = t2; }
-    if (intervalOk && (forcePublish || fabsf(h2 - lastH2) >= MQTT_HUM_DELTA) ) { mqtt.publish("esp32/sensor/hum2",  h2); anyPublished = true; if (s.h2Ok) lastH2 = h2; }
 
     if (anyPublished) lastPublishMs = now;
 }
@@ -149,29 +139,22 @@ static void taskSensor(void* param) {
     unsigned long badCount = 0;    // 累计失败次数（任意值不合法）
     while (1) {
         dht1.update();
-        dht2.update();
         float t1 = dht1.getTemperature();
         float h1 = dht1.getHumidity();
-        float t2 = dht2.getTemperature();
-        float h2 = dht2.getHumidity();
         bool t1Ok = dht1.isValid() && t1 > 1.0f && t1 <= 50.0f;
         bool h1Ok = dht1.isValid() && h1 >= 20.0f && h1 <= 90.0f;
-        bool t2Ok = dht2.isValid() && t2 > 1.0f && t2 <= 50.0f;
-        bool h2Ok = dht2.isValid() && h2 >= 20.0f && h2 <= 90.0f;
         // 全零组合兜底
         if (t1 == 0 && h1 == 0) { t1Ok = false; h1Ok = false; }
-        if (t2 == 0 && h2 == 0) { t2Ok = false; h2Ok = false; }
-        setSensorSnapshot(t1, h1, t2, h2, t1Ok, h1Ok, t2Ok, h2Ok);
+        setSensorSnapshot(t1, h1, t1Ok, h1Ok);
 
         // 周期打印当前读数 + 校验结果（让用户能跟温度计核对）
-        if (t1Ok && h1Ok && t2Ok && h2Ok) {
+        if (t1Ok && h1Ok) {
             okCount++;
         } else {
             badCount++;
         }
-        LOG_T("[Sensor] T1=%.1f%s H1=%.1f%s T2=%.1f%s H2=%.1f%s | 累计: 成功=%lu 失败=%lu",
+        LOG_T("[Sensor] T1=%.1f%s H1=%.1f%s | 累计: 成功=%lu 失败=%lu",
                       t1, t1Ok ? "" : "✗", h1, h1Ok ? "" : "✗",
-                      t2, t2Ok ? "" : "✗", h2, h2Ok ? "" : "✗",
                       okCount, badCount);
 
         vTaskDelay(pdMS_TO_TICKS(SENSOR_PERIOD_MS));
@@ -291,7 +274,7 @@ static void taskSample(void* param) {
             continue;
         }
 
-        // 4 个值中任何一个不合法就跳过本次采样（避免 0/0 等异常值进入历史）
+        // 任何值不合法就跳过本次采样（避免 0/0 等异常值进入历史）
         if (!s.allValid) {
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
@@ -306,15 +289,12 @@ static void taskSample(void* param) {
                     // 在 history mutex 下写入
                     if (xSemaphoreTake(xHistoryMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
                         sensorHistory1.checkMidnightReset(t.tm_hour, t.tm_min);
-                        sensorHistory2.checkMidnightReset(t.tm_hour, t.tm_min);
                         sensorHistory1.addSample(t.tm_hour, t.tm_min, s.t1, s.h1);
-                        sensorHistory2.addSample(t.tm_hour, t.tm_min, s.t2, s.h2);
                         sensorHistory1.saveToFile();
-                        sensorHistory2.saveToFile();
                         xSemaphoreGive(xHistoryMutex);
                     }
-                    LOG_T("[TaskSample] T1=%.1f H1=%.1f T2=%.1f H2=%.1f",
-                                  s.t1, s.h1, s.t2, s.h2);
+                    LOG_T("[TaskSample] T1=%.1f H1=%.1f",
+                                  s.t1, s.h1);
                 }
             }
         }

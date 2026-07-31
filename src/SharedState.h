@@ -7,10 +7,10 @@
 #include <time.h>
 
 // ============================================================================
-// 共享传感器数据（DHT11 × 2）
+// 共享传感器数据（DHT11 × 1）
 // ============================================================================
 struct SharedSensorData {
-    float t1, h1, t2, h2;  // 温度/湿度，0 表示未读取
+    float t1, h1;          // 温度/湿度，0 表示未读取
     bool valid;            // 至少成功读取过一次
     unsigned long lastReadMs;
 };
@@ -28,10 +28,10 @@ struct SharedTimeInfo {
 // 传感器快照（线程安全读取，所有消费者使用此接口而非直接读 DHT11）
 // ============================================================================
 struct SensorSnapshot {
-    float t1, h1, t2, h2;
-    bool t1Ok, h1Ok, t2Ok, h2Ok;   // 数值在合理范围内
-    bool allValid;                  // 4 个值全部合法（历史采样依据此标志）
-    bool anyData;                   // 至少成功读取过一次
+    float t1, h1;
+    bool t1Ok, h1Ok;       // 数值在合理范围内
+    bool allValid;         // 2 个值全部合法（历史采样依据此标志）
+    bool anyData;          // 至少成功读取过一次
     unsigned long lastReadMs;
 };
 
@@ -67,7 +67,7 @@ void initSharedState();
 SensorSnapshot getSensorSnapshot();
 
 // 写入当前传感器快照（仅 Sensor 任务调用）
-void setSensorSnapshot(float t1, float h1, float t2, float h2,
-                       bool t1Ok, bool h1Ok, bool t2Ok, bool h2Ok);
+void setSensorSnapshot(float t1, float h1,
+                       bool t1Ok, bool h1Ok);
 
 #endif
