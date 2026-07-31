@@ -319,7 +319,7 @@ void drawBottomStatus(unsigned long uptime, bool force) {
         snprintf(buf, sizeof(buf), "运行:%dh%dm", seconds/3600, (seconds%3600)/60);
     }
     
-    tft.setFont(&lgfx::fonts::efontCN_14);
+    tft.setFont(&lgfx::fonts::efontCN_12);
     tft.setTextDatum(top_left);
 
     // 清空底部状态条左侧文本区域，避免旧文本残留
