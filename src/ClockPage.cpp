@@ -397,7 +397,7 @@ void drawClockPage() {
     drawStatusBar(wifiConnected, rssi, timeSynced, true);
     drawTime(h, m, s, true);
     drawDate(year, month, day, wday, true);
-    drawSensorRow(SENSOR_Y, "T", temp1, ACCENT_COLOR, "H", hum1, TFT_CYAN, true);
+    drawSensorRow(SENSOR_Y, "T", temp1, TEMP_RED, "H", hum1, HUM_BLUE, true);
     drawBottomStatus(millis(), true);
 
     LOG_LN("[ClockPage] 完整绘制完成");
@@ -434,6 +434,6 @@ void updateClockPage() {
     drawStatusBar(wifiConnected, rssi, timeSynced, false);
     drawTime(h, m, s, false);
     drawDate(year, month, day, wday, false);
-    drawSensorRow(SENSOR_Y, "T", temp1, ACCENT_COLOR, "H", hum1, TFT_CYAN, false);
+    drawSensorRow(SENSOR_Y, "T", temp1, TEMP_RED, "H", hum1, HUM_BLUE, false);
     drawBottomStatus(millis(), false);
 }
