@@ -20,6 +20,8 @@ extern bool timeSynced;
 #define GREEN          tft.color565(80, 255, 80)
 #define RED            tft.color565(255, 80, 80)
 #define TFT_CYAN       tft.color565(0, 255, 255)
+#define TEMP_RED       tft.color565(255, 50, 50)     // 温度红
+#define HUM_BLUE       tft.color565(50, 100, 255)    // 湿度蓝
 #define TFT_ORANGE     tft.color565(255, 165, 0)
 #define TFT_GREEN      tft.color565(0, 255, 0)
 #define CLEAR_COLOR    tft.color565(0, 0, 0)
