@@ -12,6 +12,8 @@
 #include "SensorWebServer.h"
 #include "MqttManager.h"
 #include "TaskManager.h"
+#include "Theme.h"
+#include <time.h>
 
 // ============================================================================
 // 引脚定义
@@ -71,7 +73,12 @@ void setup() {
     delay(150);
     tft.init();
     tft.setRotation(0);
-    tft.fillScreen(0xF77C);
+    // 初始化主题（NTP 未同步前按当前小时判断，失败默认白天）
+    struct tm themeT;
+    if (getLocalTime(&themeT, 0)) {
+        g_currentTheme = themeModeFromHour(themeT.tm_hour);
+    }
+    tft.fillScreen(currentThemeColors().bg);
 
     // 3. 背光
     ledcSetup(BACKLIGHT_CHANNEL, 5000, 8);
@@ -136,6 +143,18 @@ void loop() {
     // 2. 每秒刷新动态部分
     if (now - lastSecond >= 1000) {
         lastSecond = now;
+        // 主题切换检测（6:00-18:00 白天，其余夜间）
+        struct tm loopT;
+        if (getLocalTime(&loopT, 0)) {
+            ThemeMode newTheme = themeModeFromHour(loopT.tm_hour);
+            if (newTheme != g_currentTheme) {
+                g_currentTheme = newTheme;
+                drawBg();
+                if (currentPage == 0) drawClockPage();
+                else                  drawChartPage();
+                LOG_T("[UI] 主题切换 -> %s", newTheme == THEME_DAY ? "白天" : "夜间");
+            }
+        }
         if (currentPage == 0) updateClockPage();
         else                  updateChartPage();
     }

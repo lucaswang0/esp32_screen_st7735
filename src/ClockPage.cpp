@@ -6,6 +6,7 @@
 #include <time.h>
 #include "WiFiManager.h"
 #include "FlipClockPage.h"
+#include "Theme.h"
 
 extern DHT11Sensor dht1;
 extern WiFiManager wifiManager;
@@ -13,19 +14,19 @@ extern bool timeSynced;
 
 #define ENABLE_DEBUG false
 
-#define BG_COLOR       tft.color565(245, 238, 225)   // 浅暖米白背景
-#define ACCENT_COLOR   tft.color565(210, 110, 40)    // 暖橙强调
-#define DIM_TEXT       tft.color565(140, 120, 100)   // 中暖灰次要文字
-#define WHITE          tft.color565(58, 42, 33)      // 深暖棕(主文字)
-#define GREEN          tft.color565(40, 135, 60)     // 深绿(连接)
-#define RED            tft.color565(185, 45, 45)     // 深红(断连)
-#define TFT_CYAN       tft.color565(40, 110, 130)    // 深青
-#define TEMP_RED       tft.color565(200, 55, 45)     // 朱红 - 温度
-#define HUM_BLUE       tft.color565(35, 95, 165)     // 深青蓝 - 湿度
-#define TFT_ORANGE     tft.color565(210, 100, 30)    // 深橙(AP提示)
-#define TFT_GREEN      tft.color565(40, 135, 60)     // 深绿
-#define CLEAR_COLOR    tft.color565(245, 238, 225)   // 清屏=背景
-#define DEBUG_BORDER   tft.color565(255, 255, 0)     // 调试边框
+#define BG_COLOR       currentThemeColors().bg
+#define ACCENT_COLOR   currentThemeColors().accent
+#define DIM_TEXT       currentThemeColors().dimText
+#define WHITE          currentThemeColors().mainText
+#define GREEN          currentThemeColors().green
+#define RED            currentThemeColors().red
+#define TFT_CYAN       currentThemeColors().humidity
+#define TEMP_RED       currentThemeColors().temp
+#define HUM_BLUE       currentThemeColors().humidity
+#define TFT_ORANGE     currentThemeColors().orange
+#define TFT_GREEN      currentThemeColors().green
+#define CLEAR_COLOR    currentThemeColors().bg
+#define DEBUG_BORDER   currentThemeColors().debugBorder
 
 const int STATUS_Y      = 0;
 const int STATUS_H      = 12;

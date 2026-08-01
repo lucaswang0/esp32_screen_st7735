@@ -5,18 +5,19 @@
 #include "SharedState.h"
 #include <time.h>
 #include "SensorHistory.h"
+#include "Theme.h"
 
 extern DHT11Sensor dht1;
 extern SensorHistory sensorHistory1;
 
 // ========== 颜色定义 ==========
-#define TEMP_COLOR     tft.color565(200, 55, 45)     // 朱红 - 温度
-#define HUMIDITY_COLOR tft.color565(35, 95, 165)     // 深青蓝 - 湿度
-#define DIM_TEXT       tft.color565(140, 120, 100)   // 中暖灰
-#define WHITE          tft.color565(58, 42, 33)      // 深暖棕
-#define BG_DARK        tft.color565(245, 238, 225)   // 浅暖背景
-#define GRID_COLOR     tft.color565(215, 200, 180)   // 浅暖灰网格
-#define GRID_LABEL     tft.color565(140, 120, 100)   // 中暖灰标签
+#define TEMP_COLOR     currentThemeColors().temp        // 温度
+#define HUMIDITY_COLOR currentThemeColors().humidity    // 湿度
+#define DIM_TEXT       currentThemeColors().dimText
+#define WHITE          currentThemeColors().mainText
+#define BG_DARK        currentThemeColors().bg          // 背景
+#define GRID_COLOR     currentThemeColors().grid
+#define GRID_LABEL     currentThemeColors().gridLabel
 
 // ========== 布局常量 ==========
 const int LABEL_Y        = 0;

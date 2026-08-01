@@ -1,5 +1,6 @@
 #include "FlipClockPage.h"
 #include "digitals.h"
+#include "Theme.h"
 #include <time.h>
 #include <math.h>
 
@@ -18,8 +19,13 @@ static const int FPS = FLIP_FPS;
 static const int TOTAL_FRAMES = FLIP_TOTAL_FRAMES;
 static const int ANIM_HALF = FLIP_ANIM_HALF;
 
-static const uint16_t BG_COLOR = FLIP_BG_COLOR;
-static const uint16_t COLON_CLR = FLIP_COLON_CLR;
+// 按当前主题选择数字位图（day/night 双套）
+static inline const uint16_t* digitUpper(uint8_t d) {
+    return (g_currentTheme == THEME_DAY) ? DIGIT_UPPER_DAY[d] : DIGIT_UPPER_NIGHT[d];
+}
+static inline const uint16_t* digitLower(uint8_t d) {
+    return (g_currentTheme == THEME_DAY) ? DIGIT_LOWER_DAY[d] : DIGIT_LOWER_NIGHT[d];
+}
 
 static void build_flip_table() {
     const int HALF = FLIP_HALF_H;
@@ -119,10 +125,10 @@ static void widget_render_single_digit(int idx, bool force_full) {
         return;
     }
 
-    const uint16_t* upper_buf = DIGIT_UPPER[d.cur];
-    const uint16_t* lower_buf = DIGIT_LOWER[d.cur];
-    const uint16_t* old_upper_buf = DIGIT_UPPER[d.old];
-    const uint16_t* old_lower_buf = DIGIT_LOWER[d.old];
+    const uint16_t* upper_buf = digitUpper(d.cur);
+    const uint16_t* lower_buf = digitLower(d.cur);
+    const uint16_t* old_upper_buf = digitUpper(d.old);
+    const uint16_t* old_lower_buf = digitLower(d.old);
 
     if (d.anim_frame < 0 || d.anim_frame >= TOTAL_FRAMES || force_full) {
         // 直接绘制完整数字（无动画）
@@ -144,7 +150,7 @@ static void widget_render_single_digit(int idx, bool force_full) {
     // 动画渲染（只渲染变化的部分）
     if (_widget_sprite_ok) {
         // 先用背景色清除该数字区域（优化：只清除变化的区域）
-        _widget_sprite->fillRect(cx, 0, WCW, WCH, BG_COLOR);
+        _widget_sprite->fillRect(cx, 0, WCW, WCH, currentThemeColors().bg);
         
         // 绘制当前数字的上半部分
         _widget_sprite->pushImage(cx, 0, WCW, WHALF, upper_buf);
@@ -208,10 +214,10 @@ static void widget_render_colon(int idx) {
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 if (y1 + dy >= 0 && y1 + dy < WCH) {
-                    _widget_sprite->drawPixel(cx + dx, y1 + dy, COLON_CLR);
+                    _widget_sprite->drawPixel(cx + dx, y1 + dy, currentThemeColors().mainText);
                 }
                 if (y2 + dy >= 0 && y2 + dy < WCH) {
-                    _widget_sprite->drawPixel(cx + dx, y2 + dy, COLON_CLR);
+                    _widget_sprite->drawPixel(cx + dx, y2 + dy, currentThemeColors().mainText);
                 }
             }
         }
@@ -224,7 +230,7 @@ static void widget_render_frame(bool force_full = false) {
 
     if (force_full) {
         // 强制全屏重绘
-        _widget_sprite->fillSprite(BG_COLOR);
+        _widget_sprite->fillSprite(currentThemeColors().bg);
         for (int i = 0; i < WIDGET_N_DIGITS; i++) {
             widget_digits[i].changed = true;
             widget_render_single_digit(i, true);
