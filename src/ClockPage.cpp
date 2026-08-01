@@ -13,19 +13,19 @@ extern bool timeSynced;
 
 #define ENABLE_DEBUG false
 
-#define BG_COLOR       tft.color565(8, 8, 20)
-#define ACCENT_COLOR   tft.color565(100, 200, 255)
-#define DIM_TEXT       tft.color565(180, 180, 200)
-#define WHITE          tft.color565(255, 255, 255)
-#define GREEN          tft.color565(80, 255, 80)
-#define RED            tft.color565(255, 80, 80)
-#define TFT_CYAN       tft.color565(0, 255, 255)
-#define TEMP_RED       tft.color565(255, 50, 50)     // 温度红
-#define HUM_BLUE       tft.color565(50, 100, 255)    // 湿度蓝
-#define TFT_ORANGE     tft.color565(255, 165, 0)
-#define TFT_GREEN      tft.color565(0, 255, 0)
-#define CLEAR_COLOR    tft.color565(0, 0, 0)
-#define DEBUG_BORDER   tft.color565(255, 255, 0)
+#define BG_COLOR       tft.color565(245, 238, 225)   // 浅暖米白背景
+#define ACCENT_COLOR   tft.color565(210, 110, 40)    // 暖橙强调
+#define DIM_TEXT       tft.color565(140, 120, 100)   // 中暖灰次要文字
+#define WHITE          tft.color565(58, 42, 33)      // 深暖棕(主文字)
+#define GREEN          tft.color565(40, 135, 60)     // 深绿(连接)
+#define RED            tft.color565(185, 45, 45)     // 深红(断连)
+#define TFT_CYAN       tft.color565(40, 110, 130)    // 深青
+#define TEMP_RED       tft.color565(200, 55, 45)     // 朱红 - 温度
+#define HUM_BLUE       tft.color565(35, 95, 165)     // 深青蓝 - 湿度
+#define TFT_ORANGE     tft.color565(210, 100, 30)    // 深橙(AP提示)
+#define TFT_GREEN      tft.color565(40, 135, 60)     // 深绿
+#define CLEAR_COLOR    tft.color565(245, 238, 225)   // 清屏=背景
+#define DEBUG_BORDER   tft.color565(255, 255, 0)     // 调试边框
 
 const int STATUS_Y      = 0;
 const int STATUS_H      = 12;
@@ -106,7 +106,7 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
     static bool blinkOn = true;
     static bool lastApMode = false;
 
-    if (g_wifiApMode) {
+    if (g_wifiApMode && !wifiConnected) {
         unsigned long now = millis();
         if (now - lastBlink >= 500) {
             lastBlink = now;
@@ -262,7 +262,7 @@ void drawSensorRow(int y, const char* label1, float value1, uint16_t color1,
                     abs(value2 - lastValues[1]) > 0.05f);
     if (!changed) return;
 
-    tft.setFont(&lgfx::fonts::efontCN_14);
+    tft.setFont(&lgfx::fonts::efontCN_16);
     
     // 准备新文本
     char buf1[20];
@@ -297,11 +297,11 @@ void drawSensorRow(int y, const char* label1, float value1, uint16_t color1,
     lastBuf2[sizeof(lastBuf2) - 1] = '\0';
 
     // 分隔线只需要绘制一次（首次或强制刷新时）
-    static bool lineDrawn = false;
-    if (force || !lineDrawn) {
-        tft.drawLine(64, y + 2, 64, y + SENSOR_H - 2, DIM_TEXT);
-        lineDrawn = true;
-    }
+    // static bool lineDrawn = false;
+    // if (force || !lineDrawn) {
+    //     tft.drawLine(64, y + 2, 64, y + SENSOR_H - 2, DIM_TEXT);
+    //     lineDrawn = true;
+    // }
 
     lastValues[0] = value1;
     lastValues[1] = value2;

@@ -71,7 +71,7 @@ void setup() {
     delay(150);
     tft.init();
     tft.setRotation(0);
-    tft.fillScreen(0x0000);
+    tft.fillScreen(0xF77C);
 
     // 3. 背光
     ledcSetup(BACKLIGHT_CHANNEL, 5000, 8);

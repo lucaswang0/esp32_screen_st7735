@@ -186,6 +186,7 @@ static void taskWiFi(void* param) {
 
         if (wifiManager.isAPStarted()) {
             wifiManager.handleClient();
+            wifiManager.handleSmartConfig();
             wifiManager.checkAPTimeout();
         } else if (connected) {
             // 启停 Web 服务跟随 WiFi 状态

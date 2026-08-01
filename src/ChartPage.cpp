@@ -10,13 +10,13 @@ extern DHT11Sensor dht1;
 extern SensorHistory sensorHistory1;
 
 // ========== 颜色定义 ==========
-#define TEMP_COLOR     tft.color565(255, 50, 50)    // 红色 - 温度
-#define HUMIDITY_COLOR tft.color565(50, 100, 255)   // 蓝色 - 湿度
-#define DIM_TEXT       tft.color565(150, 150, 180)
-#define WHITE          tft.color565(255, 255, 255)
-#define BG_DARK        tft.color565(4, 4, 14)
-#define GRID_COLOR     tft.color565(30, 30, 50)
-#define GRID_LABEL     tft.color565(80, 80, 120)
+#define TEMP_COLOR     tft.color565(200, 55, 45)     // 朱红 - 温度
+#define HUMIDITY_COLOR tft.color565(35, 95, 165)     // 深青蓝 - 湿度
+#define DIM_TEXT       tft.color565(140, 120, 100)   // 中暖灰
+#define WHITE          tft.color565(58, 42, 33)      // 深暖棕
+#define BG_DARK        tft.color565(245, 238, 225)   // 浅暖背景
+#define GRID_COLOR     tft.color565(215, 200, 180)   // 浅暖灰网格
+#define GRID_LABEL     tft.color565(140, 120, 100)   // 中暖灰标签
 
 // ========== 布局常量 ==========
 const int LABEL_Y        = 0;

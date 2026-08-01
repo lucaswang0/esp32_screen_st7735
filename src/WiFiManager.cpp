@@ -108,6 +108,8 @@ WiFiManager::WiFiManager()
       _smartConfigStarted(false),
       _apStartTime(0),
       _smartConfigStartTime(0),
+      _smartConfigProcessing(false),
+      _smartConfigWaitStart(0),
       _lastReconnectAttempt(0), _reconnectCount(0),
       _txPower(27),
       _scanCache("[]"),
@@ -135,6 +137,10 @@ void WiFiManager::begin() {
 }
 
 void WiFiManager::saveCredentials(const String& ssid, const String& password) {
+    if (ssid.length() == 0) {
+        LOG_LN("[WiFi] 拒绝保存空 SSID 凭据");
+        return;
+    }
     for (int i = 0; i < _credentialCount; i++) {
         if (_credentials[i].ssid == ssid) {
             for (int j = i; j > 0; j--) {
@@ -173,35 +179,44 @@ save:
 }
 
 bool WiFiManager::loadCredentials() {
-    _credentialCount = _preferences.getInt("count", 0);
+    int stored = _preferences.getInt("count", 0);
 
-    if (_credentialCount > MAX_WIFI_CREDENTIALS) {
-        _credentialCount = MAX_WIFI_CREDENTIALS;
+    if (stored > MAX_WIFI_CREDENTIALS) {
+        stored = MAX_WIFI_CREDENTIALS;
     }
 
-    for (int i = 0; i < _credentialCount; i++) {
+    _credentialCount = 0;
+    for (int i = 0; i < stored; i++) {
         String ssidKey = "ssid_" + String(i);
         String passKey = "pass_" + String(i);
 
+        String ssid;
         size_t ssidLen = _preferences.getBytesLength(ssidKey.c_str());
         if (ssidLen > 0) {
             char* buf = new char[ssidLen];
             _preferences.getBytes(ssidKey.c_str(), buf, ssidLen);
-            _credentials[i].ssid = buf;
+            ssid = buf;
             delete[] buf;
-        } else {
-            _credentials[i].ssid = "";
         }
 
+        String password;
         size_t passLen = _preferences.getBytesLength(passKey.c_str());
         if (passLen > 0) {
             char* buf = new char[passLen];
             _preferences.getBytes(passKey.c_str(), buf, passLen);
-            _credentials[i].password = buf;
+            password = buf;
             delete[] buf;
-        } else {
-            _credentials[i].password = "";
         }
+
+        // 过滤空 SSID 凭据（历史上可能因 SmartConfig 读取时机问题污染）
+        if (ssid.length() == 0) {
+            LOG_T("[WiFi] 跳过空 SSID 凭据 (索引 %d)", i);
+            continue;
+        }
+
+        _credentials[_credentialCount].ssid = ssid;
+        _credentials[_credentialCount].password = password;
+        _credentialCount++;
     }
 
     LOG_T("[WiFi] 从 NVS 加载 %d 个凭据", _credentialCount);
@@ -570,25 +585,42 @@ void WiFiManager::handleSmartConfig() {
     if (!_smartConfigStarted) return;
 
     if (WiFi.smartConfigDone()) {
-        LOG_LN("[SmartConfig] 收到 ESP‑Touch 配置！");
+        // smartConfigDone() 触发瞬间 STA 通常尚未关联，此时
+        // WiFi.SSID()/psk() 返回空串，直接保存会污染 NVS（写入空凭据）。
+        // 因此用状态机非阻塞等待 STA 连接成功后再读取凭据。
+        if (!_smartConfigProcessing) {
+            _smartConfigProcessing = true;
+            _smartConfigWaitStart = millis();
+            LOG_LN("[SmartConfig] 收到 ESP‑Touch 配置，等待 STA 关联...");
+        }
 
-        String ssid = WiFi.SSID();
-        String password = WiFi.psk();
+        if (WiFi.status() == WL_CONNECTED) {
+            String ssid = WiFi.SSID();
+            String password = WiFi.psk();
+            LOG_T("[SmartConfig] SSID: %s", ssid.c_str());
 
-        LOG_T("[SmartConfig] SSID: %s", ssid.c_str());
+            _smartConfigProcessing = false;
 
-        // 保存到 NVS → 停止 AP 模式 → 尝试连接
-        saveCredentials(ssid, password);
-        stopAPMode();
-        if (connectToWiFi(ssid, password)) {
-            LOG_LN("[SmartConfig] 连接成功！设备即将重启...");
+            if (ssid.length() == 0) {
+                // 已连接却读不到 SSID，属异常，丢弃并停止，避免空写
+                LOG_LN("[SmartConfig] SSID 为空，丢弃本次配置");
+                stopSmartConfig();
+                return;
+            }
+
+            saveCredentials(ssid, password);
+            stopSmartConfig();
+            stopAPMode();
+            LOG_LN("[SmartConfig] 凭据已保存，设备即将重启...");
             delay(500);
             ESP.restart();
-        } else {
-            LOG_LN("[SmartConfig] 连接失败，重新启动 AP 和 SmartConfig");
-            startAPMode();
-            startSmartConfig();
+        } else if (millis() - _smartConfigWaitStart >= 15000) {
+            // 等待 15s 仍未关联，放弃本次，重置标志让后续可重试
+            LOG_LN("[SmartConfig] 等待 STA 关联超时，重置处理状态");
+            _smartConfigProcessing = false;
+            stopSmartConfig();
         }
+        return;
     }
 
     // 超时处理：如果未收到配置，停止 SmartConfig

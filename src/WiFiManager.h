@@ -58,6 +58,8 @@ private:
     bool _smartConfigStarted;
     unsigned long _apStartTime;
     unsigned long _smartConfigStartTime;
+    bool _smartConfigProcessing;       // SmartConfig 已收到配置，正在等待 STA 关联
+    unsigned long _smartConfigWaitStart; // 开始等待 STA 关联的时刻
     unsigned long _lastReconnectAttempt;
     int _reconnectCount;
     int _txPower;

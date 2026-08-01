@@ -15,8 +15,8 @@
 #define FLIP_ANIM_HALF    10
 #define FLIP_N_STRIPS     14
 
-#define FLIP_BG_COLOR     0x18C3
-#define FLIP_COLON_CLR    0x8C51
+#define FLIP_BG_COLOR     0xF77C
+#define FLIP_COLON_CLR    0x3944
 
 #define FLIP_N_DIGITS     6
 #define FLIP_N_COLONS     2
