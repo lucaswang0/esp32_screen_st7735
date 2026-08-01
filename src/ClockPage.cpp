@@ -162,7 +162,7 @@ void drawStatusBar(bool wifiConnected, int rssi, bool ntpOk, bool force) {
         if (showIpMode) {
             String ip = wifiManager.getLocalIP();
             tft.setTextColor(ACCENT_COLOR);
-            tft.drawString(ip, 28, STATUS_Y);
+            tft.drawString(ip, 24, STATUS_Y);
         } else {
             tft.setTextColor(GREEN);
             tft.drawString("●", 28, STATUS_Y);

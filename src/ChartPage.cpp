@@ -163,7 +163,7 @@ void drawGrid(lgfx::LovyanGFX& dst, int chartY, int chartH, SensorHistory& histo
     
     // 在框内底部添加单位标识（贴框边）
     dst.setTextDatum(bottom_left);
-    dst.setFont(&lgfx::fonts::Font0);
+    dst.setFont(&lgfx::fonts::efontCN_12);
     dst.setTextColor(TEMP_COLOR);
     dst.drawString("°C", 2, chartY + chartH - 2);
     
@@ -391,7 +391,7 @@ void drawBottomData(int h, int m, int s, bool force) {
     }
     
     clearRect(0, BOTTOM_Y, CHART_W, BOTTOM_H);
-    tft.setFont(&lgfx::fonts::Font0);
+    tft.setFont(&lgfx::fonts::efontCN_14);
     tft.setTextDatum(middle_center);
     tft.setTextColor(DIM_TEXT);
     
