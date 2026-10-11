@@ -39,12 +39,23 @@ MqttManager::~MqttManager() {
 
 void MqttManager::begin(const char* server, int port,
                         const char* user, const char* pass) {
-    _server = server;
+    _serverHost = server;
     _port = port;
     _user = user;
     _pass = pass;
 
-    _client.setServer(server, port);
+    // 检测 .local 主机名 → 走 mDNS 解析，避免硬编码 IP；
+    // 其余（域名/IP）直接交给 PubSubClient 的内置解析器
+    String lower = _serverHost;
+    lower.toLowerCase();
+    _useMDNS = lower.endsWith(".local");
+
+    if (_useMDNS) {
+        LOG_T("[MQTT] 启用 mDNS 解析: %s", _serverHost.c_str());
+        // setServer 推迟到 tryConnect()，解析出 IP 后再设置
+    } else {
+        _client.setServer(_serverHost.c_str(), _port);
+    }
     _client.setKeepAlive(60);
     _client.setBufferSize(512);     // 传感器 payload 较小，512 足够
     // socket 超时由 connect() 的 TCP 部分承担（默认 1000ms 内 connect 返回）
@@ -58,12 +69,35 @@ void MqttManager::begin(const char* server, int port,
     _justConnected = false;
     transitionTo(MQTT_STATE_IDLE);
 
-    LOG_T("[MQTT] 初始化服务器: %s:%d", server, port);
+    LOG_T("[MQTT] 初始化服务器: %s:%d%s", server, port, _useMDNS ? " (mDNS)" : "");
 
     if (wifiManager.isConnected()) {
         transitionTo(MQTT_STATE_CONNECTING);
         tryConnect();
     }
+}
+
+bool MqttManager::resolveServerMDNS() {
+    // MDNS.queryHost 接受短主机名（自动查询 <name>.local），需去掉 .local 后缀
+    String host = _serverHost;
+    host.toLowerCase();
+    if (host.endsWith(".local")) {
+        host = host.substring(0, host.length() - 6);
+    }
+
+    LOG_T("[MQTT] mDNS 查询: %s.local ...", host.c_str());
+    IPAddress ip = MDNS.queryHost(host.c_str(), MDNS_QUERY_TIMEOUT_MS);
+
+    // queryHost 失败时返回 0.0.0.0
+    if (ip.toString() == "0.0.0.0") {
+        LOG_LN("[MQTT] mDNS 查询失败（broker 未通告或超时）");
+        return false;
+    }
+
+    _resolvedIP = ip;
+    _hasResolvedIP = true;
+    LOG_T("[MQTT] mDNS 解析成功: %s -> %s", _serverHost.c_str(), ip.toString().c_str());
+    return true;
 }
 
 void MqttManager::loop() {
@@ -140,6 +174,23 @@ void MqttManager::transitionTo(MqttConnState newState) {
 }
 
 void MqttManager::tryConnect() {
+    // ============ mDNS 解析（仅 .local 主机名）============
+    if (_useMDNS) {
+        // 无缓存时才解析；连接失败后缓存会被失效，触发下次重试重新解析
+        if (!_hasResolvedIP) {
+            if (!resolveServerMDNS()) {
+                LOG_LN("[MQTT] mDNS 解析失败，稍后重试");
+                scheduleNextRetry();
+                return;
+            }
+        }
+        _client.setServer(_resolvedIP, _port);
+    }
+
+    // 连接目标（用于日志 / TCP 探针）：mDNS 用解析后的 IP，否则用原始主机名
+    String targetStr = _useMDNS ? _resolvedIP.toString() : _serverHost;
+    const char* connectTarget = targetStr.c_str();
+
     // ============ 调试：TCP 探针（仅 MQTT_DEBUG 开启时执行，且仅首次）============
     #if MQTT_DEBUG
     static bool probed = false;
@@ -149,10 +200,10 @@ void MqttManager::tryConnect() {
             WiFi.localIP().toString().c_str(),
             WiFi.gatewayIP().toString().c_str(),
             WiFi.dnsIP().toString().c_str());
-        LOG_T("[MQTT] 目标: %s:%d", _server, _port);
+        LOG_T("[MQTT] 目标: %s:%d (%s)", connectTarget, _port, _serverHost.c_str());
         Serial.printf(LOG_TIME_FMT "[MQTT] TCP 探针: ", LOG_TIME_VAL);
         WiFiClient test;
-        if (test.connect(_server, _port, 5000)) {
+        if (test.connect(connectTarget, _port, 5000)) {
             Serial.println("✅ 通");
             test.stop();
         } else {
@@ -165,7 +216,7 @@ void MqttManager::tryConnect() {
     // 生成 clientId（保留原 AsyncMqttClient 版本命名风格）
     String clientId = "ESP32-" + WiFi.macAddress();
 
-    LOG_T("[MQTT] 尝试连接 %s ...", clientId.c_str());
+    LOG_T("[MQTT] 尝试连接 %s @ %s:%d ...", clientId.c_str(), connectTarget, _port);
 
     // 同步 connect：阻塞到 TCP + MQTT CONNECT/CONNACK 完成（或超时）
     bool ok;
@@ -187,6 +238,8 @@ void MqttManager::tryConnect() {
         LOG_T("[MQTT] ❌ connect() 失败, state=%d (%s)",
             _client.state(), mqttStateName(_client.state()));
         #endif
+        // 连接失败：失效 mDNS 缓存，下次重试重新解析（broker IP 可能已变）
+        if (_useMDNS) _hasResolvedIP = false;
         scheduleNextRetry();
     }
 }

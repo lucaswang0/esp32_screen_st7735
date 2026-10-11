@@ -5,6 +5,7 @@
 #include <DNSServer.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <ESPmDNS.h>
 #include <esp_wifi.h>
 
 #define WIFI_SSID      "Chinanet-CMCC-01"
@@ -63,6 +64,7 @@ private:
     unsigned long _lastReconnectAttempt;
     int _reconnectCount;
     int _txPower;
+    bool _mdnsStarted;                 // mDNS responder 是否已启动（幂等）
 
     // ============ 扫描缓存 ============
     String _scanCache;            // 上次扫描的 JSON 结果
@@ -78,6 +80,7 @@ private:
     bool connectToWiFi(const String& ssid, const String& password);
     void applyTxPower();
     bool loadCredentials();
+    void startMDNS();              // STA 连接成功后启动 mDNS responder（仅一次）
     void setupWebServer();
     void handleRoot();
     void handleSave();

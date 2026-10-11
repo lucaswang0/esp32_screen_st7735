@@ -112,6 +112,7 @@ WiFiManager::WiFiManager()
       _smartConfigWaitStart(0),
       _lastReconnectAttempt(0), _reconnectCount(0),
       _txPower(27),
+      _mdnsStarted(false),
       _scanCache("[]"),
       _scanCacheTime(0),
       _lastScanStatus(-2) {}
@@ -240,6 +241,27 @@ void WiFiManager::applyTxPower() {
     esp_wifi_set_max_tx_power(power);
 }
 
+void WiFiManager::startMDNS() {
+    // 仅启动一次：MDNS.begin 内部调用 mdns_init()，重复调用会失败
+    if (_mdnsStarted) return;
+
+    // 设备名基于 MAC 后缀，保证局域网内多设备唯一
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    String host = "esp32-" + mac.substring(6, 12);  // esp32-XXXXXX
+
+    if (!MDNS.begin(host.c_str())) {
+        LOG_LN("[WiFi] mDNS responder 启动失败");
+        return;
+    }
+    _mdnsStarted = true;
+
+    // 通告 HTTP 服务（WiFi 配置门户 / 传感器历史页面）
+    MDNS.addService("http", "tcp", 80);
+
+    LOG_T("[WiFi] mDNS 已启动: http://%s.local", host.c_str());
+}
+
 bool WiFiManager::connectToWiFi(const String& ssid, const String& password) {
     if (ssid.length() == 0) return false;
 
@@ -257,6 +279,9 @@ bool WiFiManager::connectToWiFi(const String& ssid, const String& password) {
 
     if (WiFi.status() == WL_CONNECTED) {
         LOG_T("[WiFi] 已连接: %s, IP: %s", ssid.c_str(), WiFi.localIP().toString().c_str());
+        // 启动 mDNS responder（幂等）：既通告本机 .local 主机名，
+        // 也初始化 mDNS 子系统，供 MqttManager 用 queryHost 解析 broker
+        startMDNS();
         _reconnectCount = 0;
         return true;
     }

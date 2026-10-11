@@ -18,7 +18,7 @@
 // ============================================================================
 // 引脚定义
 // ============================================================================
-#define DHTPIN1         6
+#define DHTPIN1         7
 #define PIN_TFT_BL      5
 #define BACKLIGHT_CHANNEL 0
 #define LED_PIN 8
@@ -30,9 +30,15 @@
 #define BACKLIGHT_PERCENT       80
 
 // ============================================================================
-// MQTT 配置  恢复原服务器（10.43.1.201）
+// MQTT 配置
+// 服务器通过 mDNS 解析（不再使用固定 IP）：
+//   - 主机名以 .local 结尾时，MqttManager 会用 MDNS.queryHost 动态解析其 IP
+//   - MQTT broker 需在局域网内通过 mDNS/avahi 通告该主机名
+//     例如：mosquitto + avahi 通告为 "mqtt" → 此处填 "mqtt.local"
+//          Home Assistant → "homeassistant.local"
+//   - 设备本机也会通告为 esp32-<MAC后缀>.local（见 WiFiManager::startMDNS）
 // ============================================================================
-#define MQTT_SERVER "mqtt.covid.ccwu.cc"
+#define MQTT_SERVER "emini.local"
 #define MQTT_PORT   1883
 #define MQTT_USER   "admin"
 #define MQTT_PASS   "lwei2HRTINQz"
@@ -72,7 +78,7 @@ void setup() {
     digitalWrite(2, HIGH);
     delay(150);
     tft.init();
-    tft.setRotation(0);
+    tft.setRotation(2);
     // 初始化主题（NTP 未同步前按当前小时判断，失败默认白天）
     struct tm themeT;
     if (getLocalTime(&themeT, 0)) {

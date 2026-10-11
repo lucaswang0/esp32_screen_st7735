@@ -3,6 +3,7 @@
 
 #include <PubSubClient.h>          // 同步 MQTT 客户端（基于 WiFiClient）
 #include <WiFi.h>
+#include <ESPmDNS.h>               // mDNS：解析 xxx.local 主机名，避免硬编码 IP
 #include <freertos/semphr.h>
 
 // ============================================================================
@@ -40,11 +41,17 @@ public:
 private:
     WiFiClient _wifiClient;
     PubSubClient _client;             // 用 _wifiClient 构造
-    const char* _server = nullptr;
+    String _serverHost;               // MQTT 服务器主机名（可为 xxx.local）
     int _port = 1883;
     const char* _user = nullptr;
     const char* _pass = nullptr;
     bool _justConnected = false;
+
+    // ============ mDNS 解析（仅当 _serverHost 以 .local 结尾）============
+    bool _useMDNS = false;            // 是否启用 mDNS 解析
+    IPAddress _resolvedIP;            // 缓存的解析结果
+    bool _hasResolvedIP = false;      // _resolvedIP 是否有效
+    static const uint32_t MDNS_QUERY_TIMEOUT_MS = 2000;  // 单次 mDNS 查询超时
 
     // ============ 重试状态机 ============
     MqttConnState _state = MQTT_STATE_IDLE;
@@ -60,6 +67,7 @@ private:
     static const unsigned long CONNECT_TIMEOUT_MS   = 10000;   // 一次 connect() 的最长等待
 
     void tryConnect();             // 同步调用，阻塞至 connect() 返回
+    bool resolveServerMDNS();      // 用 MDNS.queryHost 解析 _serverHost → _resolvedIP
     void scheduleNextRetry();
     void enterSleep();
     void resetRetry();
