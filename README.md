@@ -6,7 +6,7 @@
 
 ### 显示
 - **翻页时钟动画**：首页时间采用翻页动画（20 FPS），显示完整的 HH:MM:SS
-- **双页面轮换**：时钟页和图表页每 10 秒自动切换
+- **触摸翻页**：TP223 电容触摸按键（GPIO10），每次触摸切换到下一页；页面由 `kPages[]` 页面表驱动，可扩展多页
 - **温湿度图表**：单图表双 Y 轴绘制温度（红）与湿度（蓝）曲线，时间坐标轴 0~127 占满图表框宽度，温度范围/湿度范围标签紧贴框内边缘
 - **背景色擦除**：传感器行采用"上次文本背景色覆盖"的双缓冲，避免数值位数变化时残留字尾
 - **背光亮度控制**：0-100% PWM 调光
@@ -14,7 +14,7 @@
 - **WiFi/IP 显示切换**：状态栏每 5 秒在 IP 地址与 RSSI 之间切换
 
 ### 传感器
-- **DHT11 ×1**：GPIO6
+- **DHT11 ×1**：GPIO7
 - **历史数据存储**：按日期保存到 SPIFFS `/sensor1_YYYY-MM-DD.dat`
 - **自动清理**：保留最近 7 天数据，自动删除更早的文件
 - **降噪处理**：阈值抑制 DHT11 抖动噪声，连续失败时复用上一次有效值
@@ -45,8 +45,9 @@
 | GPIO3 | TFT MOSI |
 | GPIO4 | TFT SCLK |
 | GPIO5 | TFT BL（背光）|
-| GPIO6 | DHT11（温湿度）|
+| GPIO7 | DHT11（温湿度）|
 | GPIO8 | 板载 LED |
+| GPIO10 | TP223 触摸按键（推挽输出，按下为高电平）|
 
 ### 屏幕参数
 
@@ -72,6 +73,8 @@
 └────────────────────────────────┘
 ```
 
+![时钟页面实拍](img/page1.jpg)
+
 ### 页面 1：图表页面
 
 ```
@@ -96,6 +99,30 @@
 │            14:30                │ ← 底部时间 (HH:MM)
 └────────────────────────────────┘
 ```
+
+## 页面表（扩展新页面）
+
+页面不再写死在 loop 里，而是登记在 `main.cpp` 的 `kPages[]` 中，每项包含 4 个回调：
+
+```cpp
+struct PageDef {
+    void (*init)();     // 初始化（setup 阶段调用一次）
+    void (*draw)();     // 整页重绘
+    void (*update)();   // 每秒刷新
+    void (*animate)();  // 高频动画（20 FPS），无则填 nullptr
+};
+
+static const PageDef kPages[] = {
+    { initClockPage, drawClockPage, updateClockPage, renderFlipClockWidgetAnimation },
+    { initChartPage, drawChartPage, updateChartPage, nullptr },
+};
+static const int PAGE_COUNT = sizeof(kPages) / sizeof(kPages[0]);
+```
+
+- 数组顺序 = 触摸切换顺序，页面数量由 `PAGE_COUNT` 自动推导
+- 切换使用 `if (++currentPage >= PAGE_COUNT) currentPage = 0;`（不使用取模）
+- setup 阶段遍历调用所有页面的 `init()`；loop 中按当前页分发 `draw`/`update`/`animate`，无需 `if (currentPage == …)` 分支
+- 新增页面：实现该页的 `init/draw/update`（`animate` 可选），在 `kPages` 末尾追加一行即可
 
 ## 项目结构
 
@@ -125,7 +152,7 @@ src/
 ├── TaskManager.cpp    # 5 个任务：WiFi/NTP/Sample/MQTT/Web + UI
 ├── digitals.h         # 翻页时钟数字位图数据
 ├── Log.h              # 全局日志宏 (LOG_T/LOG_LN)
-└── main.cpp           # 主程序入口（Setup / Loop 页面调度）
+└── main.cpp           # 主程序入口（Setup / Loop 触摸翻页 + 页面表 kPages）
 ```
 
 ## 使用说明
@@ -221,7 +248,8 @@ platformio run --target upload
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `BACKLIGHT_PERCENT` | 80 | 背光亮度百分比（0-100）|
-| `PAGE_SWITCH_INTERVAL` | 10000 | 页面切换间隔（毫秒）|
+| `PIN_TOUCH` | 10 | TP223 触摸按键引脚 |
+| `TOUCH_DEBOUNCE_MS` | 50 | 触摸去抖间隔（毫秒）|
 | `SENSOR_PERIOD_MS` | 5000 | 传感器采样间隔（毫秒）|
 | `WIFI_CHECK_INTERVAL` | 5000 | WiFi 检查间隔（毫秒）|
 | `MQTT_FORCE_PUBLISH_INTERVAL` | 60000 | MQTT 保活推送间隔（毫秒）|
@@ -254,7 +282,7 @@ platformio run --target upload
 | `taskSample` | 5s | 读取 DHT11、写入历史、推送到 MQTT |
 | `taskMQTT` | 50ms | MQTT 状态机轮询、发布节流控制 |
 | `taskWeb` | 5s | Web 服务器处理客户端请求 |
-| `taskDisplay` | 主循环 | 页面切换、翻页动画、传感器/图表重绘 |
+| `taskDisplay` | 主循环 | 触摸翻页调度、翻页动画、传感器/图表重绘 |
 
 ### 数据流
 

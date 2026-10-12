@@ -40,7 +40,7 @@ const int DATE_H        = 18;
 const int SENSOR_Y       = DATE_Y + DATE_H + 3;
 const int SENSOR_H       = 18;
 
-const int BOTTOM_Y       = SENSOR_Y + SENSOR_H + 4;
+const int BOTTOM_Y       = SENSOR_Y + SENSOR_H + 4 + 18;
 const int BOTTOM_H       = 128 - BOTTOM_Y;
 
 const int LABEL_X       = 0;
@@ -269,7 +269,7 @@ void drawSensorRow(int y, const char* label1, float value1, uint16_t color1,
     char buf1[20];
     snprintf(buf1, sizeof(buf1), "%s:%.1f°C", label1, value1);
     char buf2[20];
-    snprintf(buf2, sizeof(buf2), "%.1f%% %s", value2, label2);
+    snprintf(buf2, sizeof(buf2), "%s:%.1f%%", label2, value2);
 
     // 先用背景色擦除上一帧文本（避免新文本比旧文本短时残留字尾）
     if (lastBuf1[0] != '\0') {

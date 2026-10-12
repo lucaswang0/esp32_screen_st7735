@@ -9,6 +9,7 @@
 #include "ClockPage.h"
 #include "FlipClockPage.h"
 #include "ChartPage.h"
+#include "SysInfoPage.h"
 #include "SensorWebServer.h"
 #include "MqttManager.h"
 #include "TaskManager.h"
@@ -22,11 +23,12 @@
 #define PIN_TFT_BL      5
 #define BACKLIGHT_CHANNEL 0
 #define LED_PIN 8
+#define PIN_TOUCH       10      // TP223 电容触摸按键
 
 // ============================================================================
 // 页面切换
 // ============================================================================
-#define PAGE_SWITCH_INTERVAL    10000   // 10秒切换页面
+#define TOUCH_DEBOUNCE_MS       50      // 触摸去抖
 #define BACKLIGHT_PERCENT       80
 
 // ============================================================================
@@ -56,6 +58,26 @@ SensorWebServer webServer;
 // 跨文件全局（ClockPage 仍引用）
 // ============================================================================
 bool timeSynced = false;         // 同步到 g_timeInfo.synced（保留向后兼容）
+volatile uint32_t g_touchCount = 0;   // 触摸次数（SysInfoPage 显示）
+
+// ============================================================================
+// 页面表
+// 新增页面只需：1) 实现 init/draw/update（可选 animate）；2) 在 kPages 末尾追加一行。
+// 数组顺序即触摸切换顺序，页面数量由 PAGE_COUNT 自动推导。
+// ============================================================================
+struct PageDef {
+    void (*init)();     // 初始化（setup 阶段调用一次）
+    void (*draw)();     // 整页重绘
+    void (*update)();   // 每秒刷新
+    void (*animate)();  // 高频动画（20FPS），无则填 nullptr
+};
+
+static const PageDef kPages[] = {
+    { initClockPage, drawClockPage, updateClockPage, renderFlipClockWidgetAnimation },
+    { initChartPage, drawChartPage, updateChartPage, nullptr },
+    { initSysInfoPage, drawSysInfoPage, updateSysInfoPage, nullptr },
+};
+static const int PAGE_COUNT = sizeof(kPages) / sizeof(kPages[0]);
 
 // ============================================================================
 // Setup
@@ -67,6 +89,28 @@ void setup() {
     Serial.println("║     ✨ 现代时钟 v2.1 (FreeRTOS) ✨   ║");
     Serial.println("╚══════════════════════════════════════╝");
     LOG_T("[MAIN] 启动 v2.1 (uptime=%lu ms)", millis());
+
+    // ─────────── 硬件探测（一次性打印，用于确定 SysInfoPage 显示项）───────────
+    LOG_LN("────────────── 硬件探测 ──────────────");
+    LOG_T("Chip   : %s  rev%d  cores=%d",
+          ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+    LOG_T("CPU    : %lu MHz", (unsigned long)getCpuFrequencyMhz());
+    LOG_T("Flash  : %lu KB (%lu MB)  speed=%lu MHz  mode=%d",
+          (unsigned long)(ESP.getFlashChipSize() / 1024),
+          (unsigned long)(ESP.getFlashChipSize() / 1048576),
+          (unsigned long)(ESP.getFlashChipSpeed() / 1000000),
+          (int)ESP.getFlashChipMode());
+    LOG_T("Heap   : total %lu KB  free %lu KB  min %lu KB  maxAlloc %lu KB",
+          (unsigned long)(ESP.getHeapSize() / 1024),
+          (unsigned long)(ESP.getFreeHeap() / 1024),
+          (unsigned long)(ESP.getMinFreeHeap() / 1024),
+          (unsigned long)(ESP.getMaxAllocHeap() / 1024));
+    LOG_T("PSRAM  : %lu KB", (unsigned long)(ESP.getPsramSize() / 1024));
+    LOG_T("SDK    : %s", ESP.getSdkVersion());
+    LOG_T("Sketch : %lu KB used  free %lu KB",
+          (unsigned long)(ESP.getSketchSize() / 1024),
+          (unsigned long)(ESP.getFreeSketchSpace() / 1024));
+    LOG_LN("──────────────────────────────────────");
 
     // 1. 互斥锁和共享状态
     initSharedState();
@@ -95,6 +139,9 @@ void setup() {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
 
+    // 4.1 触摸按键 (TP223，推挽输出，按下为高电平)
+    pinMode(PIN_TOUCH, INPUT);
+
     // 5. 传感器
     dht1.begin();
 
@@ -112,8 +159,7 @@ void setup() {
     webServer.begin();
 
     // 9. 页面初始化
-    initClockPage();
-    initChartPage();
+    for (int i = 0; i < PAGE_COUNT; i++) kPages[i].init();
 
     // 10. 首次绘制
     LOG_LN("[OK] 初始化完成");
@@ -130,21 +176,24 @@ void setup() {
 // ============================================================================
 void loop() {
     static unsigned long lastSecond   = 0;
-    static unsigned long lastPageSwitch = 0;
+    static unsigned long lastTouch    = 0;
     static unsigned long lastRender   = 0;
     static int currentPage = 0;
+    static int lastTouchState = LOW;
 
     unsigned long now = millis();
 
-    // 1. 页面切换 (每 10 秒)
-    if (now - lastPageSwitch >= PAGE_SWITCH_INTERVAL) {
-        lastPageSwitch = now;
-        currentPage = (currentPage + 1) % 2;
+    // 1. 触摸按键 (TP223)：每次触摸切到下一页
+    int touch = digitalRead(PIN_TOUCH);
+    if (touch == HIGH && lastTouchState == LOW && now - lastTouch >= TOUCH_DEBOUNCE_MS) {
+        lastTouch = now;
+        g_touchCount++;
+        if (++currentPage >= PAGE_COUNT) currentPage = 0;
         drawBg();
-        if (currentPage == 0) drawClockPage();
-        else                  drawChartPage();
-        LOG_T("[UI] 切换到页面 %d", currentPage);
+        kPages[currentPage].draw();
+        LOG_T("[UI] 触摸切换到页面 %d", currentPage);
     }
+    lastTouchState = touch;
 
     // 2. 每秒刷新动态部分
     if (now - lastSecond >= 1000) {
@@ -156,21 +205,17 @@ void loop() {
             if (newTheme != g_currentTheme) {
                 g_currentTheme = newTheme;
                 drawBg();
-                if (currentPage == 0) drawClockPage();
-                else                  drawChartPage();
+                kPages[currentPage].draw();
                 LOG_T("[UI] 主题切换 -> %s", newTheme == THEME_DAY ? "白天" : "夜间");
             }
         }
-        if (currentPage == 0) updateClockPage();
-        else                  updateChartPage();
+        kPages[currentPage].update();
     }
 
-    // 3. 翻页时钟动画 (20FPS)
-    if (currentPage == 0) {
-        if (now - lastRender >= (1000 / 20)) {
-            lastRender = now;
-            renderFlipClockWidgetAnimation();
-        }
+    // 3. 当前页面的高频动画 (20FPS)
+    if (kPages[currentPage].animate && now - lastRender >= (1000 / 20)) {
+        lastRender = now;
+        kPages[currentPage].animate();
     }
 
     // 短延时让出 CPU
