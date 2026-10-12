@@ -1,12 +1,13 @@
 # Weather Clock - ESP32-C3 ST7735 温湿度时钟
 
-基于 ESP32-C3 和 ST7735 1.44" 128×128 TFT 显示屏的温湿度时钟项目，带翻页时钟动画、Web 配置界面、图表页面和 MQTT 远程发布功能。
+基于 ESP32-C3 和 ST7735 1.44" 128×128 TFT 显示屏的温湿度时钟项目，带翻页时钟动画、Web 配置界面、图表页面、系统信息页面和 MQTT 远程发布功能。三个页面由 TP223 触摸按键循环切换。
 
 ## 功能特性
 
 ### 显示
 - **翻页时钟动画**：首页时间采用翻页动画（20 FPS），显示完整的 HH:MM:SS
 - **触摸翻页**：TP223 电容触摸按键（GPIO10），每次触摸切换到下一页；页面由 `kPages[]` 页面表驱动，可扩展多页
+- **系统信息页面**：显示芯片修订/CPU/Flash/内存/芯片温度/RSSI/IP/DHT11/触摸计数；每行按内容缓存，值未变化不重绘，避免闪烁
 - **温湿度图表**：单图表双 Y 轴绘制温度（红）与湿度（蓝）曲线，时间坐标轴 0~127 占满图表框宽度，温度范围/湿度范围标签紧贴框内边缘
 - **背景色擦除**：传感器行采用"上次文本背景色覆盖"的双缓冲，避免数值位数变化时残留字尾
 - **背光亮度控制**：0-100% PWM 调光
@@ -100,6 +101,39 @@
 └────────────────────────────────┘
 ```
 
+### 页面 2：系统信息页面
+
+```
+┌────────────────────────────────┐
+│ ESP32-C3           160MHz r4   │ ← 标题 (芯片标识 / 实测 CPU 频率 + 芯片修订号)
+├────────────────────────────────┤
+│ Uptime:  02d 03:45:12          │ ← 运行时间 (天 时:分:秒)
+│ Heap:    250K / min 246K        │ ← 内存 (当前空闲 / 历史最低空闲)
+│ Flash:   4MB  80MHz             │ ← Flash (容量 / 速率，均实测)
+│ Temp:    42°C      RSSI -58dBm  │ ← 芯片内部温度 / WiFi 信号强度
+│ IP:      192.168.1.100          │ ← 本机 IP
+├────────────────────────────────┤
+│ DHT11:   25.3°C    48.0%RH      │ ← 环境温湿度 (温度红 / 湿度蓝)
+│ TTP223:  12次                   │ ← 触摸累计次数
+└────────────────────────────────┘
+```
+
+布局为 8 行（标题 + 7 内容），行距 15px。数据来源：
+
+| 行 | 数据来源 |
+|----|----------|
+| 标题 | `getCpuFrequencyMhz()` + `ESP.getChipRevision()`（实测值）|
+| Uptime | `millis()` 换算 天/时/分/秒 |
+| Heap | `ESP.getFreeHeap()` / `ESP.getMinFreeHeap()` |
+| Flash | `ESP.getFlashChipSize()` / `ESP.getFlashChipSpeed()` |
+| Temp | `temperatureRead()`（芯片内部温度传感器）|
+| RSSI | `WiFi.RSSI()`，未连接时显示 `--` |
+| IP | `WiFiManager` 当前 IP，未连接时显示 `--` |
+| DHT11 | `getSensorSnapshot()`（温度红 / 湿度蓝）|
+| TTP223 | `g_touchCount`（`main.cpp` 在每次触摸时自增）|
+
+> **关于标称值**：本页的 Flash 容量、CPU 频率、芯片修订号均为运行时实测。ESP32-C3 堆区实测约 272KB（`ESP.getHeapSize()`），板级定义中的 `maximum_ram_size = 327680`（320KB）是链接脚本标称值，二者不等价，故本页不使用 320KB 这一数字。
+
 ## 页面表（扩展新页面）
 
 页面不再写死在 loop 里，而是登记在 `main.cpp` 的 `kPages[]` 中，每项包含 4 个回调：
@@ -115,6 +149,7 @@ struct PageDef {
 static const PageDef kPages[] = {
     { initClockPage, drawClockPage, updateClockPage, renderFlipClockWidgetAnimation },
     { initChartPage, drawChartPage, updateChartPage, nullptr },
+    { initSysInfoPage, drawSysInfoPage, updateSysInfoPage, nullptr },
 };
 static const int PAGE_COUNT = sizeof(kPages) / sizeof(kPages[0]);
 ```
@@ -136,6 +171,8 @@ src/
 ├── FlipClockPage.cpp  # 翻页时钟动画实现（20 FPS）
 ├── ChartPage.h        # 图表页面声明
 ├── ChartPage.cpp      # 图表页面绘制（sprite 双缓冲，时间轴 0~127 占满）
+├── SysInfoPage.h      # 系统信息页面声明
+├── SysInfoPage.cpp    # 系统信息页面绘制（逐行缓存，仅变化行重绘）
 ├── SensorHistory.h    # 传感器历史数据类
 ├── SensorHistory.cpp  # 传感器数据存储与文件读写
 ├── SensorWebServer.h  # Web 服务器声明
@@ -282,7 +319,7 @@ platformio run --target upload
 | `taskSample` | 5s | 读取 DHT11、写入历史、推送到 MQTT |
 | `taskMQTT` | 50ms | MQTT 状态机轮询、发布节流控制 |
 | `taskWeb` | 5s | Web 服务器处理客户端请求 |
-| `taskDisplay` | 主循环 | 触摸翻页调度、翻页动画、传感器/图表重绘 |
+| `taskDisplay` | 主循环 | 触摸翻页调度、翻页动画、各页面重绘（时钟/图表/系统信息）|
 
 ### 数据流
 
