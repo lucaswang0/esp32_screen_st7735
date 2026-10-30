@@ -7,6 +7,7 @@
 #include "WiFiManager.h"
 #include "FlipClockPage.h"
 #include "Theme.h"
+#include "cal_almanac.h"
 
 extern DHT11Sensor dht1;
 extern WiFiManager wifiManager;
@@ -37,11 +38,14 @@ const int TIME_H        = 32;
 const int DATE_Y        = TIME_Y + TIME_H + 4;
 const int DATE_H        = 18;
 
-const int SENSOR_Y       = DATE_Y + DATE_H + 3;
+const int LUNAR_Y       = DATE_Y + DATE_H;
+const int LUNAR_H       = 12;
+
+const int SENSOR_Y       = LUNAR_Y + LUNAR_H + 2;
 const int SENSOR_H       = 18;
 
-const int BOTTOM_Y       = SENSOR_Y + SENSOR_H + 4 + 18;
-const int BOTTOM_H       = 128 - BOTTOM_Y;
+const int BOTTOM_H       = 15;
+const int BOTTOM_Y       = 128 - BOTTOM_H;
 
 const int LABEL_X       = 0;
 
@@ -222,6 +226,28 @@ void drawTime(int h, int m, int s, bool force) {
     lastDisplayMinute = currentMinute;
 }
 
+// 当日节气；当天不是节气日则返回下一个节气名与日期（如 "立冬 11/7"）
+static void buildSolarTermText(const cal_date &d, char *buf, size_t n) {
+    buf[0] = '\0';
+    for (int i = 0; i < CAL_TERM_NUM; i++) {
+        cal_date td;
+        if (!cal_solar_term_date(d.year, i, &td)) return;
+        if (td.month == d.month && td.day == d.day) {
+            snprintf(buf, n, "%s", cal_solar_term_name(i));
+            return;
+        }
+        if (td.month > d.month || (td.month == d.month && td.day > d.day)) {
+            snprintf(buf, n, "%s %d/%d", cal_solar_term_name(i), td.month, td.day);
+            return;
+        }
+    }
+    // 已过冬至 → 下一个节气是次年小寒
+    cal_date td;
+    if (cal_solar_term_date(d.year + 1, 0, &td)) {
+        snprintf(buf, n, "%s %d/%d", cal_solar_term_name(0), td.month, td.day);
+    }
+}
+
 // ========== 优化后的 drawDate ==========
 void drawDate(int year, int month, int day, int wday, bool force) {
     int currentDay = year * 10000 + month * 100 + day;
@@ -230,7 +256,7 @@ void drawDate(int year, int month, int day, int wday, bool force) {
         return;
     }
     
-    clearRectDebug(0, DATE_Y, 128, DATE_H, "日期");
+    clearRectDebug(0, DATE_Y, 128, DATE_H + LUNAR_H, "日期");
     
     tft.setFont(&lgfx::fonts::efontCN_16);
     tft.setTextColor(WHITE);
@@ -246,6 +272,29 @@ void drawDate(int year, int month, int day, int wday, bool force) {
     char weekBuf[8];
     snprintf(weekBuf, sizeof(weekBuf), "周%s", WEEK_DAYS[wday]);
     tft.drawString(weekBuf, 127, DATE_Y);
+
+    // 农历日期（离线计算，显示在公历下方）
+    cal_date today = {year, month, day};
+    cal_lunar lunar;
+    char lunarBuf[CAL_TEXT_MAX] = "";
+    if (cal_lunar_from_solar(&today, &lunar)) {
+        cal_lunar_text(&lunar, lunarBuf, sizeof(lunarBuf));
+    }
+    tft.setFont(&lgfx::fonts::efontCN_12);
+    tft.setTextColor(DIM_TEXT);
+    tft.setTextDatum(top_left);
+    if (lunarBuf[0] != '\0') {
+        tft.drawString(lunarBuf, 0, LUNAR_Y);
+    }
+
+    // 当日节气；非节气日显示下一个节气及日期
+    char termBuf[16];
+    buildSolarTermText(today, termBuf, sizeof(termBuf));
+    if (termBuf[0] != '\0') {
+        tft.setTextColor(ACCENT_COLOR);
+        tft.setTextDatum(top_right);
+        tft.drawString(termBuf, 127, LUNAR_Y);
+    }
     
     lastDay = day;
     lastWday = wday;
