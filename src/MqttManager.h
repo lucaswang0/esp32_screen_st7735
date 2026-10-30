@@ -51,6 +51,7 @@ private:
     bool _useMDNS = false;            // 是否启用 mDNS 解析
     IPAddress _resolvedIP;            // 缓存的解析结果
     bool _hasResolvedIP = false;      // _resolvedIP 是否有效
+    bool _mdnsStarted = false;        // mDNS responder 是否已启动（幂等）
     static const uint32_t MDNS_QUERY_TIMEOUT_MS = 2000;  // 单次 mDNS 查询超时
 
     // ============ 重试状态机 ============
@@ -68,6 +69,7 @@ private:
 
     void tryConnect();             // 同步调用，阻塞至 connect() 返回
     bool resolveServerMDNS();      // 用 MDNS.queryHost 解析 _serverHost → _resolvedIP
+    void ensureMDNSStarted();      // 幂等启动 mDNS responder（通告本机 .local 主机名）
     void scheduleNextRetry();
     void enterSleep();
     void resetRetry();

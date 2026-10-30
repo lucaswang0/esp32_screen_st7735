@@ -10,7 +10,6 @@
 
 #include <Arduino.h>
 #include <time.h>
-#include <SPIFFS.h>
 
 // ============================================================================
 // 外部全局对象（在 main.cpp 中定义）
@@ -137,6 +136,11 @@ static void publishSensorData() {
 static void taskSensor(void* param) {
     unsigned long okCount = 0;     // 累计成功次数
     unsigned long badCount = 0;    // 累计失败次数（任意值不合法）
+    float lastT1 = -999.0f;        // 上次打印的读数
+    float lastH1 = -999.0f;
+    bool  lastT1Ok = false;        // 上次打印的合法性
+    bool  lastH1Ok = false;
+    bool  firstLog = true;         // 首次必定打印
     while (1) {
         dht1.update();
         float t1 = dht1.getTemperature();
@@ -147,15 +151,22 @@ static void taskSensor(void* param) {
         if (t1 == 0 && h1 == 0) { t1Ok = false; h1Ok = false; }
         setSensorSnapshot(t1, h1, t1Ok, h1Ok);
 
-        // 周期打印当前读数 + 校验结果（让用户能跟温度计核对）
         if (t1Ok && h1Ok) {
             okCount++;
         } else {
             badCount++;
         }
-        LOG_T("[Sensor] T1=%.1f%s H1=%.1f%s | 累计: 成功=%lu 失败=%lu",
-                      t1, t1Ok ? "" : "✗", h1, h1Ok ? "" : "✗",
-                      okCount, badCount);
+        // 仅在读数或合法性变化时打印，避免稳定时每 5s 刷屏
+        bool changed = firstLog || t1 != lastT1 || h1 != lastH1 ||
+                       t1Ok != lastT1Ok || h1Ok != lastH1Ok;
+        if (changed) {
+            LOG_T("[Sensor] T1=%.1f%s H1=%.1f%s | 累计: 成功=%lu 失败=%lu",
+                          t1, t1Ok ? "" : "✗", h1, h1Ok ? "" : "✗",
+                          okCount, badCount);
+            lastT1 = t1; lastH1 = h1;
+            lastT1Ok = t1Ok; lastH1Ok = h1Ok;
+            firstLog = false;
+        }
 
         vTaskDelay(pdMS_TO_TICKS(SENSOR_PERIOD_MS));
     }
@@ -163,6 +174,8 @@ static void taskSensor(void* param) {
 
 // ============================================================================
 // Task 2: WiFi - 维护连接，处理 AP 模式请求
+// 说明：AP/配网门户的 handleClient/handleSmartConfig 已由
+//       WiFiManager::maintainConnection() 内部处理，此处不再重复调用
 // ============================================================================
 static void taskWiFi(void* param) {
     static bool webStarted = false;
@@ -171,10 +184,6 @@ static void taskWiFi(void* param) {
     static bool ledState = false;
 
     while (1) {
-        bool connected = wifiManager.isConnected();
-        g_wifiConnected = connected;
-        g_wifiApMode    = wifiManager.isAPStarted();
-
         // 首次连接（一次性，connect() 内部 delay() 会让出 CPU）
         if (!initialConnectDone && !wifiManager.isAPStarted()) {
             LOG_LN("[TaskWiFi] 首次连接尝试...");
@@ -184,25 +193,25 @@ static void taskWiFi(void* param) {
             initialConnectDone = true;
         }
 
-        if (wifiManager.isAPStarted()) {
-            wifiManager.handleClient();
-            wifiManager.handleSmartConfig();
-            wifiManager.checkAPTimeout();
-        } else if (connected) {
-            // 启停 Web 服务跟随 WiFi 状态
+        // 维护连接：内部处理重连 / AP 配网门户
+        wifiManager.maintainConnection();
+
+        bool connected = wifiManager.isConnected();
+        g_wifiConnected = connected;
+        g_wifiApMode    = wifiManager.isAPStarted();
+
+        // 网页服务跟随 WiFi 状态：连接后由 SensorWebServer 提供，
+        // AP/配网模式由 WiFiManager 门户提供，二者不同时占用 80 端口
+        if (connected) {
             if (!webStarted) {
                 webServer.start();
                 webStarted = true;
             }
-            // 已连接，调用 maintainConnection 重置重连计数
-            wifiManager.maintainConnection();
         } else {
-            // 断连时停 Web，让 maintainConnection 处理重连（内部 30s 退避）
             if (webStarted) {
                 webServer.stop();
                 webStarted = false;
             }
-            wifiManager.maintainConnection();
         }
 
         // LED 指示（断连时 500ms 闪烁）

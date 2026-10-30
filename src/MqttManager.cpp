@@ -77,7 +77,33 @@ void MqttManager::begin(const char* server, int port,
     }
 }
 
+// 幂等启动 mDNS responder：主机名基于 MAC 后缀，保证局域网内多设备唯一。
+// 该职责原先由 WiFiManager::startMDNS() 承担，改用照搬版 WiFiManager 后不再提供，
+// 因此由 MqttManager 自行初始化，供 MDNS.queryHost 解析 broker 使用。
+void MqttManager::ensureMDNSStarted() {
+    if (_mdnsStarted) return;
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    String host = "esp32-" + mac.substring(6, 12);  // esp32-XXXXXX
+
+    if (!MDNS.begin(host.c_str())) {
+        LOG_LN("[MQTT] mDNS responder 启动失败");
+        return;
+    }
+    _mdnsStarted = true;
+
+    // 通告本机 HTTP 服务（SensorWebServer）
+    MDNS.addService("http", "tcp", 80);
+
+    LOG_T("[MQTT] mDNS 已启动: http://%s.local", host.c_str());
+}
+
 bool MqttManager::resolveServerMDNS() {
+    // 确保 mDNS responder 已启动，否则 queryHost 无法工作
+    ensureMDNSStarted();
+
     // MDNS.queryHost 接受短主机名（自动查询 <name>.local），需去掉 .local 后缀
     String host = _serverHost;
     host.toLowerCase();

@@ -1,7 +1,7 @@
 #include "SensorWebServer.h"
 #include "Log.h"
 #include <WebServer.h>
-#include <FS.h>
+#include <LittleFS.h>
 #include "DHT11Sensor.h"
 #include "WiFiManager.h"
 #include "SharedState.h"
@@ -380,7 +380,7 @@ void SensorWebServer::start() {
     _server->begin();
     _running = true;
     LOG_LN("[WebServer] HTTP 服务已启动");
-    LOG_T("[WebServer] 访问: http://%s/", wifiManager.getLocalIP().c_str());
+    LOG_T("[WebServer] 访问: http://%s/", wifiManager.getLocalIP());
 }
 
 void SensorWebServer::stop() {
@@ -434,7 +434,7 @@ String SensorWebServer::buildCurrentJson() const {
     json += "\"temp1\":" + String(t1, 1) + ",";
     json += "\"hum1\":" + String(h1, 1) + ",";
     json += "\"rssi\":" + String(wifiManager.getRSSI()) + ",";
-    json += "\"ip\":\"" + wifiManager.getLocalIP() + "\",";
+    json += "\"ip\":\"" + String(wifiManager.getLocalIP()) + "\",";
 
     struct tm timeinfo;
     char timeStr[16] = "--:--:--";
@@ -539,18 +539,18 @@ void SensorWebServer::handleApiDates() {
     snprintf(today, sizeof(today), "%04d-%02d-%02d",
              tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
 
-    // 扫描 SPIFFS 中以 "/sensor1_" 开头、".dat" 结尾的文件，提取日期
+    // 扫描 LittleFS 中以 "/sensor1_" 开头、".dat" 结尾的文件，提取日期
     String json = "{\"today\":\"";
     json += today;
     json += "\",\"dates\":[";
     bool first = true;
 
-    fs::File root = SPIFFS.open("/");
+    fs::File root = LittleFS.open("/");
     if (root) {
         fs::File file = root.openNextFile();
         while (file) {
             String name = file.name();
-            // SPIFFS 迭代时 file.name() 可能返回 "sensor1_2026-07-23.dat"
+            // LittleFS 迭代时 file.name() 可能返回 "sensor1_2026-07-23.dat"
             // 也可能返回 "/sensor1_2026-07-23.dat"，统一去掉前导 /
             if (name.startsWith("/")) name = name.substring(1);
             if (name.startsWith("sensor1_") && name.endsWith(".dat")) {

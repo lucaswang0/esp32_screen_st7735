@@ -70,8 +70,8 @@ void SensorHistory::cleanOldFiles() {
         char oldFilename[32];
         getFilenameForDay(oldFilename, sizeof(oldFilename), -i);
         
-        if (SPIFFS.exists(oldFilename)) {
-            if (SPIFFS.remove(oldFilename)) {
+        if (LittleFS.exists(oldFilename)) {
+            if (LittleFS.remove(oldFilename)) {
                 LOG_T("[SensorHistory] 删除 %d 天前的旧文件: %s", i, oldFilename);
             } else {
                 LOG_T("[SensorHistory] 删除失败: %s", oldFilename);
@@ -128,7 +128,7 @@ void SensorHistory::saveToFile() {
 }
 
 void SensorHistory::saveToFile(const char* filename) {
-    fs::File file = SPIFFS.open(filename, FILE_WRITE);
+    fs::File file = LittleFS.open(filename, FILE_WRITE);
     if (!file) {
         LOG_T("[SensorHistory] 保存失败: %s", filename);
         return;
@@ -158,7 +158,7 @@ bool SensorHistory::loadFromFile() {
 }
 
 bool SensorHistory::loadFromFile(const char* filename) {
-    fs::File file = SPIFFS.open(filename, FILE_READ);
+    fs::File file = LittleFS.open(filename, FILE_READ);
     if (!file) {
         LOG_T("[SensorHistory] 文件不存在: %s", filename);
         return false;
@@ -213,11 +213,11 @@ int SensorHistory::readByDate(const char* date, SensorSample* outBuffer, int max
         getCurrentFilename(filename, sizeof(filename));
     }
 
-    if (!SPIFFS.exists(filename)) {
+    if (!LittleFS.exists(filename)) {
         return 0;
     }
 
-    fs::File file = SPIFFS.open(filename, FILE_READ);
+    fs::File file = LittleFS.open(filename, FILE_READ);
     if (!file) {
         return 0;
     }

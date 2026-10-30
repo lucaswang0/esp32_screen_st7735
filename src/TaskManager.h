@@ -10,7 +10,7 @@
 #define TASK_STACK_SENSOR      4096   // 4KB - DHT11 临界区
 #define TASK_STACK_WIFI        8192   // 8KB - WiFi scan / saveCredentials
 #define TASK_STACK_NTP         4096   // 4KB
-#define TASK_STACK_SAMPLE      6144   // 6KB - SPIFFS I/O
+#define TASK_STACK_SAMPLE      6144   // 6KB - LittleFS I/O
 #define TASK_STACK_MQTT        6144   // 6KB
 #define TASK_STACK_WEB         8192   // 8KB - HTTP 处理
 #define TASK_STACK_BACKLIGHT   2048   // 2KB

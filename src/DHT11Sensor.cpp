@@ -141,12 +141,10 @@ bool DHT11Sensor::readSensor() {
             }
             _humidity = data[0] + data[1] * 0.1;
             _temperature = data[2] + data[3] * 0.1;
+            // 正常成功不逐次打印（每 5s 一条太吵），仅重试成功时记录
             if (attempt > 1) {
                 LOG_T("[DHT11] 第 %d 次重试成功 | 引脚: GPIO%d | 温度: %.1f°C | 湿度: %.1f%% | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
                               attempt, _pin, _temperature, _humidity, data[0], data[1], data[2], data[3], data[4]);
-            } else {
-                LOG_T("[DHT11] 读取成功 | 引脚: GPIO%d | 温度: %.1f°C | 湿度: %.1f%% | 原始数据: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
-                              _pin, _temperature, _humidity, data[0], data[1], data[2], data[3], data[4]);
             }
             readOk = true;
             break;

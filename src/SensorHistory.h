@@ -2,7 +2,7 @@
 #define SENSOR_HISTORY_H
 
 #include <Arduino.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
 #define MAX_SAMPLES 288
 
