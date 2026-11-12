@@ -184,6 +184,18 @@ static void taskWiFi(void* param) {
     static bool ledState = false;
 
     while (1) {
+        // 触摸长按请求进入配网模式（WiFi 操作统一由本任务执行）
+        if (g_wifiConfigRequest) {
+            g_wifiConfigRequest = false;
+            LOG_LN("[TaskWiFi] 长按请求 -> 进入配网模式");
+            // 先释放 80 端口，交给配网门户
+            if (webStarted) {
+                webServer.stop();
+                webStarted = false;
+            }
+            wifiManager.startAPMode();
+        }
+
         // 首次连接（一次性，connect() 内部 delay() 会让出 CPU）
         if (!initialConnectDone && !wifiManager.isAPStarted()) {
             LOG_LN("[TaskWiFi] 首次连接尝试...");
@@ -202,7 +214,7 @@ static void taskWiFi(void* param) {
 
         // 网页服务跟随 WiFi 状态：连接后由 SensorWebServer 提供，
         // AP/配网模式由 WiFiManager 门户提供，二者不同时占用 80 端口
-        if (connected) {
+        if (connected && !g_wifiApMode) {
             if (!webStarted) {
                 webServer.start();
                 webStarted = true;

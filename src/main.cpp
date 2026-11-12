@@ -162,16 +162,19 @@ static void updateScreenState(unsigned long now) {
     }
 }
 
-// 长按：手动息屏
+// 长按：进入配网模式（开启 AP 门户，手机连热点自动弹出配置页）
 static void handleLongPress() {
-    manualOff = true;
-    wakeUntil = 0;
     pendingClick = false;
-    if (!screenOff) {
-        screenOff = true;
-        setBacklight(false);
+    manualOff    = false;
+    wakeUntil    = 0;
+    if (screenOff) {
+        screenOff = false;
+        setBacklight(true);
+        redrawPage();
     }
-    LOG_LN("[UI] 长按 -> 息屏");
+    g_wifiConfigRequest = true;   // WiFi 操作由 WiFi 任务执行，避免跨任务竞态
+    showOverlay("配网模式");
+    LOG_LN("[UI] 长按 -> 进入配网模式");
 }
 
 // 双击：切换自动息屏功能

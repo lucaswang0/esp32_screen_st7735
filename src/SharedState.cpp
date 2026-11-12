@@ -19,6 +19,7 @@ SharedTimeInfo   g_timeInfo   = {{0}, false, false};
 // ============================================================================
 volatile bool g_wifiConnected = false;
 volatile bool g_wifiApMode    = false;
+volatile bool g_wifiConfigRequest = false;
 
 // ============================================================================
 // 初始化（setup() 中首先调用）

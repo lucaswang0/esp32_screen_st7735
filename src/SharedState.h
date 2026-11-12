@@ -53,6 +53,7 @@ extern SharedTimeInfo   g_timeInfo;
 // ============================================================================
 extern volatile bool g_wifiConnected;
 extern volatile bool g_wifiApMode;
+extern volatile bool g_wifiConfigRequest;   // 触摸长按请求进入配网模式（由 WiFi 任务处理）
 
 // ============================================================================
 // 初始化（创建所有互斥锁，setup() 开头调用）
