@@ -3,6 +3,7 @@
 
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
 #include <Preferences.h>
 #include <LittleFS.h>
 
@@ -55,6 +56,9 @@ public:
 private:
     void startWebServer();
     void stopWebServer();
+    void startPortalDns();       // 启动 Captive Portal 的 DNS 劫持
+    void stopPortalDns();
+    void updateApSsid();         // 按 MAC 末两字节生成热点名 esp32-xxxx
     void handleRoot();
     void handleScan();
     void handleSave();
@@ -79,6 +83,9 @@ private:
 
     Preferences preferences;
     WebServer* webServer;
+    DNSServer dnsServer;
+    bool dnsStarted;
+    String apSsid;               // 热点名：esp32-<MAC 末两字节>
     bool configMode;
     bool fsServerStarted;
     fs::File uploadFile;
@@ -98,7 +105,6 @@ private:
     static const unsigned long SMART_CONFIG_TIMEOUT_MS = 30 * 1000UL;
     static const unsigned long CONFIG_MODE_TIMEOUT_MS = 10 * 60 * 1000UL;
     static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20 * 1000UL;
-    bool _smartConfigPhase;             // 处于 SmartConfig 阶段
     unsigned long _configModeStartTime; // 配网窗口起点
     bool _configDisabled;               // 配网超时后禁用（只能重启后再配网）
 

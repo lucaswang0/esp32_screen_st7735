@@ -7,6 +7,7 @@ static const char* TAG = "WiFi";
 
 WiFiManager::WiFiManager() :
  webServer(nullptr),
+ dnsStarted(false),
  configMode(false),
  fsServerStarted(false),
  credentialCount(0),
@@ -20,7 +21,6 @@ WiFiManager::WiFiManager() :
  smartConfigStarted(false),
  smartConfigDone(false),
  smartConfigStartTime(0),
- _smartConfigPhase(false),
  _configModeStartTime(0),
  _configDisabled(false),
  _reconnectAttempts(0),
@@ -95,40 +95,28 @@ void WiFiManager::maintainConnection() {
 void WiFiManager::startConfigMode() {
  configMode = true;
  _configModeStartTime = millis();
- _smartConfigPhase = true;
  _netReady = false;
 
- ESP_LOGI(TAG, "[WiFi] 进入配网模式：先启动 SmartConfig（%lus 无密码则切换 AP 门户，总窗口 %lu 分钟）",
-               SMART_CONFIG_TIMEOUT_MS / 1000, CONFIG_MODE_TIMEOUT_MS / 60000);
+ ESP_LOGI(TAG, "[WiFi] 进入配网模式：立即开启热点门户（Captive Portal），总窗口 %lu 分钟",
+               CONFIG_MODE_TIMEOUT_MS / 60000);
 
- // SmartConfig 工作在 STA 模式（此时不建立 AP，避免 beginSmartConfig 拆掉 AP 接口）
- WiFi.mode(WIFI_STA);
- startSmartConfig();
+ // 热点优先：无凭据/连接失败时立刻开出配网热点，手机连上即可自动弹出配置页。
+ // 注意：不在此自动启用 SmartConfig —— Arduino 的 beginSmartConfig() 会强制切到
+ // WIFI_STA 并拆掉 SoftAP，与"热点立即可用"冲突（单射频无法并行）。
+ startConfigPortal();
 }
 
 void WiFiManager::handleConfigMode() {
  unsigned long elapsed = millis() - _configModeStartTime;
 
- // STA 已连上（SmartConfig 收到密码或门户配置生效）→ 配网成功
+ // STA 已连上（门户配置生效后重启前，或已有凭据自行连上）→ 配网成功
  if (WiFi.status() == WL_CONNECTED) {
   ESP_LOGI(TAG, "[WiFi] 配网成功! IP: %s", WiFi.localIP().toString().c_str());
   stopSmartConfig();
   stopAPMode();
   configMode = false;
-  _smartConfigPhase = false;
   onConnected();
   return;
- }
-
- // SmartConfig 阶段：30s 内未收到密码则停止并切换到 AP 门户
- if (_smartConfigPhase) {
-  handleSmartConfig();
-  if (smartConfigDone || elapsed >= SMART_CONFIG_TIMEOUT_MS) {
-   stopSmartConfig();
-   _smartConfigPhase = false;
-   ESP_LOGI(TAG, "[WiFi] SmartConfig 阶段结束，切换到 AP 配网门户");
-   startConfigPortal();
-  }
  }
 
  // 配网总窗口超时：关闭 WiFi，禁止再次自动配网（只能重启后配置）
@@ -138,7 +126,6 @@ void WiFiManager::handleConfigMode() {
   stopAPMode();
   WiFi.mode(WIFI_OFF);
   configMode = false;
-  _smartConfigPhase = false;
   _configDisabled = true;
   _netReady = false;
  }
@@ -237,6 +224,10 @@ bool WiFiManager::isAPMode() {
 }
 
 void WiFiManager::handleClient() {
+ // Captive Portal：处理 DNS 查询（把任意域名应答为 AP 地址）
+ if (dnsStarted) {
+  dnsServer.processNextRequest();
+ }
  if (webServer) {
   webServer->handleClient();
  }
@@ -247,7 +238,6 @@ void WiFiManager::startAPMode() {
 
  // 手动 AP 优先（用户长按触摸触发）：终止自动配网（SmartConfig / 配网窗口）
  stopSmartConfig();
- _smartConfigPhase = false;
  configMode = false;
 
  ESP_LOGI(TAG, "Starting AP mode...");
@@ -255,7 +245,8 @@ void WiFiManager::startAPMode() {
  WiFi.mode(WIFI_AP_STA);
 
  WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
- WiFi.softAP("ESP32-Weather", NULL, 1, false, 4);
+ updateApSsid();
+ WiFi.softAP(apSsid.c_str(), NULL, 1, false, 4);
 
  delay(500);
 
@@ -265,10 +256,13 @@ void WiFiManager::startAPMode() {
  apStarted = true;
  apStartTime = millis();
 
+ startPortalDns();
  startWebServer();
 }
 
 void WiFiManager::stopAPMode() {
+ stopPortalDns();
+
  if (!apStarted) return;
 
  ESP_LOGI(TAG, "Stopping AP mode...");
@@ -291,6 +285,36 @@ void WiFiManager::stopWebServer() {
   webServer = nullptr;
  }
  fsServerStarted = false;
+}
+
+void WiFiManager::startPortalDns() {
+ if (dnsStarted) {
+  dnsServer.stop();
+  dnsStarted = false;
+ }
+
+ // 把所有域名解析到热点地址，触发手机/PC 的 Captive Portal 检测
+ dnsStarted = dnsServer.start(53, "*", WiFi.softAPIP());
+ if (dnsStarted) {
+  ESP_LOGI(TAG, "[CaptivePortal] DNS 劫持已启动 -> %s", WiFi.softAPIP().toString().c_str());
+ } else {
+  ESP_LOGW(TAG, "[CaptivePortal] DNS 劫持启动失败（不影响手动打开 http://192.168.4.1/）");
+ }
+}
+
+void WiFiManager::stopPortalDns() {
+ if (!dnsStarted) return;
+ dnsServer.stop();
+ dnsStarted = false;
+ ESP_LOGI(TAG, "[CaptivePortal] DNS 劫持已停止");
+}
+
+void WiFiManager::updateApSsid() {
+ uint8_t mac[6] = {0};
+ WiFi.macAddress(mac);
+ char buf[16];
+ snprintf(buf, sizeof(buf), "esp32-%02x%02x", mac[4], mac[5]);
+ apSsid = buf;
 }
 
 bool WiFiManager::isAPStarted() {
@@ -400,7 +424,8 @@ void WiFiManager::startConfigPortal() {
  delay(100);
 
  WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
- WiFi.softAP("ESP32-Weather", NULL, 1, false, 4);
+ updateApSsid();
+ WiFi.softAP(apSsid.c_str(), NULL, 1, false, 4);
 
  delay(500);
 
@@ -410,6 +435,7 @@ void WiFiManager::startConfigPortal() {
  apStarted = true;
  apStartTime = millis();
 
+ startPortalDns();
  startWebServer();
 }
 
@@ -652,7 +678,13 @@ void WiFiManager::handleForget() {
 }
 
 void WiFiManager::handleNotFound() {
- webServer->send(404, "text/plain", "Not Found");
+ // Captive Portal：DNS 已把任意域名解析到本机，这里把所有未注册路径
+ // （/generate_204、/hotspot-detect.html、/connecttest.txt、/canonical.html 等
+ // 各系统的联网探测地址）统一 302 回配置页，系统据此判定"需要登录"并自动弹窗。
+ String url = "http://" + WiFi.softAPIP().toString() + "/";
+ webServer->sendHeader("Location", url, true);
+ webServer->sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+ webServer->send(302, "text/html", "<html><body><a href='" + url + "'>WiFi 配置</a></body></html>");
 }
 
 void WiFiManager::connectToWiFi(const char* ssid, const char* password, int timeoutMs) {
@@ -746,7 +778,7 @@ bool WiFiManager::isConfigMode() {
 }
 
 const char* WiFiManager::getConfigSSID() {
- return "ESP32-Weather";
+ return apSsid.c_str();
 }
 
 const char* WiFiManager::getConfigPassword() {
